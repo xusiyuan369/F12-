@@ -1,0 +1,2059 @@
+// ==UserScript==
+// @name         DevScope 开发者工具 v5.4.1
+// @namespace    devtools-sidebar-native
+// @version      5.4.1
+// @description  完整独立实现的网页调试工具 - 修复展开按钮 bug 及多项加固
+// @author       Developer
+// @run-at       document-end
+// @match        *://*/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // ============ SVG 图标工厂 ============
+    const SVG = {
+        menu: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>',
+        close: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>',
+        sun: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>',
+        moon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>'
+    };
+
+    // ============ 全局变量 ============
+    let isOpen = false;
+    let activeTab = 'console';
+    let activeToolTab = 'regex';
+    let activeResourceTab = 'local';
+    let isDarkTheme = false;
+    let activeLogFilters = { log: true, warn: true, error: true, info: true };
+    let searchQuery = '';
+    let logs = [];
+    let networkRequests = [];
+    let selectedElement = null;
+    let isSelectingElement = false;
+    let elementIdCounter = 0;
+    const elementMap = new Map();
+    let expandedObjects = new Set();
+    let elementTreeRendered = false;
+    let expandedNodes = new Set();
+    let totalNodesRendered = 0;
+    const MAX_NODES = 5000;
+    let networkResponseMap = new Map();
+
+    let longPressTimer = null;
+    let longPressTriggered = false;
+
+    // ============ 工具函数 ============
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function safeStringify(obj) {
+        try {
+            return JSON.stringify(obj, null, 2);
+        } catch {
+            return String(obj);
+        }
+    }
+
+    // ============ 样式创建 ============
+    function createStyles() {
+        const style = document.createElement('style');
+        style.id = 'devtools-native-styles';
+        style.textContent = `
+            /* 开关按钮 - 窄版 + 脉冲动画 */
+            .devtools-toggle-btn {
+                position: fixed !important;
+                top: 50% !important;
+                right: 0 !important;
+                transform: translateY(-50%) !important;
+                z-index: 2147483647 !important;
+                background: #0078d4 !important;
+                color: white !important;
+                border: none !important;
+                padding: 10px 6px !important;
+                border-radius: 6px 0 0 6px !important;
+                cursor: pointer !important;
+                font-size: 20px !important;
+                box-shadow: -2px 0 12px rgba(0,0,0,0.3), 0 0 6px rgba(0,120,212,0.6) !important;
+                font-family: sans-serif !important;
+                line-height: 1 !important;
+                text-align: center !important;
+                width: 32px !important;
+                transition: right 0.3s ease, background 0.2s !important;
+                animation: devtools-pulse 2s infinite !important;
+                pointer-events: auto !important;
+            }
+            .devtools-toggle-btn:hover {
+                background: #005a9e !important;
+                box-shadow: -2px 0 16px rgba(0,0,0,0.4), 0 0 10px rgba(0,120,212,1) !important;
+            }
+            .devtools-toggle-btn.open { right: 520px !important; }
+            @keyframes devtools-pulse {
+                0%, 100% { box-shadow: -2px 0 12px rgba(0,0,0,0.3), 0 0 6px rgba(0,120,212,0.6); }
+                50% { box-shadow: -2px 0 18px rgba(0,0,0,0.4), 0 0 14px rgba(255,255,0,0.9); }
+            }
+
+            .devtools-sidebar {
+                position: fixed !important;
+                top: 0 !important;
+                right: -520px !important;
+                width: 520px !important;
+                height: 100vh !important;
+                background: var(--bg-sidebar, #fff) !important;
+                z-index: 2147483646 !important;
+                transition: right 0.3s ease !important;
+                display: flex !important;
+                flex-direction: column !important;
+                box-shadow: -2px 0 10px rgba(0,0,0,0.2) !important;
+                font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif !important;
+                border-left: 1px solid var(--border, #ccc) !important;
+            }
+            .devtools-sidebar.open { right: 0 !important; }
+
+            /* 头部 */
+            .devtools-header {
+                background: var(--bg-header, #f5f5f5) !important;
+                padding: 12px 16px !important;
+                border-bottom: 1px solid var(--border, #ccc) !important;
+                display: flex !important;
+                justify-content: space-between !important;
+                align-items: center !important;
+                flex-shrink: 0 !important;
+            }
+            .devtools-header h3 {
+                color: var(--text-primary, #333) !important;
+                font-size: 14px !important;
+                font-weight: 600 !important;
+                margin: 0 !important;
+            }
+            .devtools-header-right { display: flex !important; gap: 8px !important; align-items: center !important; }
+            .devtools-theme-btn, .devtools-close-btn {
+                background: none !important; border: none !important;
+                color: var(--text-secondary, #666) !important;
+                font-size: 18px !important; cursor: pointer !important; padding: 4px !important;
+                display: flex !important; align-items: center !important;
+            }
+            .devtools-theme-btn:hover, .devtools-close-btn:hover { color: var(--text-primary, #000) !important; }
+
+            /* 标签栏 */
+            .devtools-tabs {
+                display: flex !important; background: var(--bg-tabs, #fafafa) !important;
+                border-bottom: 1px solid var(--border, #ccc) !important;
+                flex-shrink: 0 !important; overflow-x: auto !important;
+            }
+            .devtools-tab {
+                padding: 10px 14px !important; color: var(--text-secondary, #666) !important;
+                cursor: pointer !important; font-size: 12px !important;
+                border-bottom: 2px solid transparent !important;
+                transition: all 0.2s !important; white-space: nowrap !important;
+                display: flex !important; align-items: center !important; gap: 4px !important;
+            }
+            .devtools-tab:hover { color: var(--text-primary, #333) !important; }
+            .devtools-tab.active {
+                color: var(--text-primary, #000) !important;
+                border-bottom-color: var(--border-active, #000) !important;
+                background: var(--bg-panel, #fff) !important;
+            }
+
+            /* 内容区域 */
+            .devtools-content { flex: 1 !important; overflow: auto !important; color: var(--text-primary, #333) !important; font-size: 12px !important; }
+            .devtools-panel { display: none !important; height: 100% !important; overflow: auto !important; }
+            .devtools-panel.active { display: block !important; }
+
+            /* 控制台样式 */
+            .devtools-console-wrapper { padding: 8px !important; height: 100% !important; display: flex !important; flex-direction: column !important; }
+            .devtools-console-header {
+                display: flex !important; gap: 6px !important; padding: 8px !important;
+                border-bottom: 1px solid var(--border-light, #eee) !important; margin-bottom: 8px !important; flex-wrap: wrap !important;
+                flex-shrink: 0 !important;
+            }
+            .devtools-console-btn {
+                padding: 4px 10px !important; background: var(--bg-btn, #f0f0f0) !important;
+                color: var(--text-primary, #333) !important; border: 1px solid var(--border, #ccc) !important;
+                border-radius: 3px !important; cursor: pointer !important; font-size: 11px !important;
+            }
+            .devtools-console-btn:hover { background: var(--bg-btn-hover, #e0e0e0) !important; }
+            .devtools-console-btn.active { background: var(--bg-btn-active, #000) !important; color: white !important; }
+            .devtools-search-box {
+                flex: 1 !important; min-width: 120px !important; padding: 4px 8px !important;
+                border: 1px solid var(--border, #ccc) !important; border-radius: 3px !important;
+                font-size: 11px !important; background: var(--bg-panel, #fff) !important; color: var(--text-primary, #333) !important;
+            }
+            .devtools-console-logs {
+                flex: 1 !important; overflow-y: auto !important; min-height: 0 !important;
+            }
+            .devtools-console-input-wrapper {
+                flex-shrink: 0 !important; display: flex !important; gap: 8px !important; padding-top: 8px !important;
+                border-top: 1px solid var(--border-light, #eee) !important;
+            }
+            .devtools-console-input {
+                flex: 1 !important; padding: 6px 8px !important; border: 1px solid var(--border, #ccc) !important;
+                border-radius: 3px !important; font-family: Consolas, Monaco, monospace !important; font-size: 12px !important;
+                background: var(--bg-panel, #fff) !important; color: var(--text-primary, #333) !important;
+            }
+            .devtools-log-item {
+                padding: 4px 8px !important; border-bottom: 1px solid var(--border-light, #eee) !important;
+                word-break: break-all !important; background: var(--bg-panel, #fff) !important;
+            }
+            .devtools-log-item.log { color: var(--text-primary, #333) !important; }
+            .devtools-log-item.warn { color: var(--text-warn, #996600) !important; background: var(--bg-warn, #fffbe6) !important; }
+            .devtools-log-item.error { color: var(--text-error, #c00) !important; background: var(--bg-error, #fff5f5) !important; }
+            .devtools-log-item.info { color: var(--text-info, #0066cc) !important; background: var(--bg-info, #f0f7ff) !important; }
+            .devtools-log-toggle { display: inline-block; margin-right: 6px; cursor: pointer; user-select: none; }
+
+            /* 元素面板 */
+            .devtools-elements-wrapper { padding: 8px !important; height: 100% !important; display: flex !important; flex-direction: column !important; }
+            .devtools-elements-header {
+                padding: 8px !important; border-bottom: 1px solid var(--border-light, #eee) !important;
+                margin-bottom: 8px !important; display: flex !important; gap: 8px !important; flex-shrink: 0 !important;
+            }
+            .devtools-element-selector {
+                padding: 4px 12px !important; background: var(--bg-btn, #f0f0f0) !important;
+                color: var(--text-primary, #333) !important; border: 1px solid var(--border, #ccc) !important;
+                border-radius: 3px !important; cursor: pointer !important; font-size: 11px !important;
+            }
+            .devtools-element-selector.active { background: var(--bg-btn-active, #000) !important; color: white !important; }
+            .devtools-element-selector:hover { background: var(--bg-btn-hover, #e0e0e0) !important; }
+            .devtools-element-container { display: flex !important; flex: 1 !important; overflow: hidden !important; }
+            .devtools-element-tree {
+                flex: 1 !important; overflow-y: auto !important;
+                font-family: 'Consolas', 'Monaco', monospace !important; font-size: 11px !important;
+                color: var(--text-primary, #333) !important;
+            }
+            .devtools-tree-node { padding: 2px 4px !important; cursor: pointer !important; user-select: none !important; }
+            .devtools-tree-node:hover { background: var(--bg-hover, #f5f5f5) !important; }
+            .devtools-tree-node.selected { background: var(--bg-selected, #000) !important; color: white !important; }
+            .devtools-tree-toggle { display: inline-block !important; width: 16px !important; text-align: center !important; color: var(--text-secondary, #666) !important; }
+            .devtools-tree-children { margin-left: 16px !important; display: none !important; }
+            .devtools-tree-children.open { display: block !important; }
+            .devtools-tag-name { color: var(--text-tag, #555) !important; }
+            .devtools-attr-name { color: var(--text-attr, #666) !important; }
+            .devtools-attr-value { color: var(--text-primary, #333) !important; }
+            .devtools-element-inspector {
+                width: 220px !important; border-left: 1px solid var(--border-light, #eee) !important;
+                padding: 8px !important; overflow-y: auto !important;
+            }
+            .devtools-inspector-title { font-weight: 600 !important; margin-bottom: 8px !important; font-size: 12px !important; }
+            .devtools-inspector-section { margin-bottom: 12px !important; }
+            .devtools-inspector-prop { display: flex !important; margin-bottom: 4px !important; }
+            .devtools-inspector-key { color: var(--text-attr, #666) !important; min-width: 80px !important; }
+            .devtools-inspector-val { word-break: break-all !important; }
+            .devtools-highlight-overlay {
+                position: fixed !important; z-index: 2147483644 !important; pointer-events: none !important;
+                background: rgba(0,0,0,0.1) !important; border: 2px solid var(--text-primary, #000) !important; box-sizing: border-box !important;
+            }
+
+            /* 网络面板 */
+            .devtools-network-wrapper { padding: 8px !important; height: 100% !important; display: flex !important; flex-direction: column !important; }
+            .devtools-network-header {
+                padding: 8px !important; border-bottom: 1px solid var(--border-light, #eee) !important;
+                margin-bottom: 8px !important; display: flex !important; gap: 8px !important; flex-shrink: 0 !important;
+            }
+            .devtools-network-list-wrapper { flex: 1 !important; overflow-y: auto !important; }
+            .devtools-network-item {
+                padding: 4px 8px !important; border-bottom: 1px solid var(--border-light, #eee) !important;
+                display: flex !important; gap: 6px !important; font-size: 11px !important;
+                background: var(--bg-panel, #fff) !important; cursor: pointer !important;
+            }
+            .devtools-network-item:hover { background: var(--bg-hover, #f5f5f5) !important; }
+            .devtools-network-method { min-width: 50px !important; font-weight: bold !important; color: var(--text-primary, #333) !important; }
+            .devtools-network-url { flex: 1 !important; overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important; color: var(--text-secondary, #666) !important; }
+            .devtools-network-status { min-width: 40px !important; text-align: right !important; color: var(--text-primary, #333) !important; }
+            .devtools-network-status.success { color: var(--text-success, #333) !important; }
+            .devtools-network-status.error { color: var(--text-error, #c00) !important; }
+            .devtools-network-time { min-width: 50px !important; text-align: right !important; color: var(--text-secondary, #999) !important; }
+            .devtools-network-details {
+                padding: 10px !important; background: var(--bg-details, #fafafa) !important; border-bottom: 1px solid var(--border-light, #eee) !important;
+                max-height: 50% !important; overflow-y: auto !important; flex-shrink: 0 !important;
+            }
+            .devtools-details-header { display: flex !important; justify-content: space-between !important; align-items: center !important; margin-bottom: 10px !important; }
+            .devtools-details-title { font-weight: 600 !important; font-size: 12px !important; }
+            .devtools-details-close { cursor: pointer !important; color: var(--text-secondary, #666) !important; }
+            .devtools-details-item { margin-bottom: 6px !important; font-size: 11px !important; }
+            .devtools-details-label { font-weight: 600 !important; margin-bottom: 3px !important; }
+            .devtools-details-value { word-break: break-all !important; }
+            .devtools-details-tabs { display: flex !important; gap: 8px !important; margin-bottom: 8px !important; border-bottom: 1px solid var(--border-light, #eee) !important; padding-bottom: 8px !important; }
+            .devtools-details-tab { padding: 4px 10px !important; cursor: pointer !important; border-radius: 3px !important; }
+            .devtools-details-tab:hover { background: var(--bg-hover, #f5f5f5) !important; }
+            .devtools-details-tab.active { background: var(--bg-btn-active, #000) !important; color: white !important; }
+            .devtools-details-tab-content { display: none; }
+            .devtools-details-tab-content.active { display: block; }
+
+            /* 资源面板 */
+            .devtools-resources-wrapper { padding: 0 !important; height: 100% !important; display: flex !important; flex-direction: column !important; }
+            .devtools-resource-tabs {
+                display: flex !important; border-bottom: 1px solid var(--border-light, #eee) !important;
+                background: var(--bg-tabs, #fafafa) !important; flex-shrink: 0 !important; overflow-x: auto !important;
+            }
+            .devtools-resource-tab {
+                padding: 8px 10px !important; color: var(--text-secondary, #666) !important; cursor: pointer !important;
+                font-size: 11px !important; border-bottom: 2px solid transparent !important; white-space: nowrap !important;
+                display: flex !important; align-items: center !important; gap: 4px !important;
+            }
+            .devtools-resource-tab:hover { color: var(--text-primary, #333) !important; }
+            .devtools-resource-tab.active {
+                color: var(--text-primary, #000) !important; border-bottom-color: var(--border-active, #000) !important; background: var(--bg-panel, #fff) !important;
+            }
+            .devtools-resource-content { flex: 1 !important; overflow: auto !important; padding: 8px !important; }
+            .devtools-resource-header { display: flex !important; justify-content: space-between !important; align-items: center !important; margin-bottom: 8px !important; }
+            .devtools-resource-title { font-size: 13px !important; font-weight: 600 !important; color: var(--text-primary, #333) !important; }
+            .devtools-storage-table { width: 100% !important; border-collapse: collapse !important; font-size: 11px !important; }
+            .devtools-storage-table th, .devtools-storage-table td {
+                border: 1px solid var(--border-light, #eee) !important; padding: 5px 7px !important;
+                text-align: left !important; word-break: break-all !important;
+            }
+            .devtools-storage-table th {
+                background: var(--bg-header, #f5f5f5) !important; color: var(--text-primary, #333) !important;
+                font-weight: 600 !important; position: sticky !important; top: 0 !important;
+            }
+            .devtools-storage-table td { background: var(--bg-panel, #fff) !important; }
+            .devtools-storage-table tr:hover td { background: var(--bg-hover, #f9f9f9) !important; }
+            .devtools-action-btn {
+                padding: 2px 6px !important; margin: 0 2px !important; background: var(--bg-btn, #f0f0f0) !important;
+                border: 1px solid var(--border, #ccc) !important; border-radius: 2px !important;
+                cursor: pointer !important; font-size: 10px !important;
+            }
+            .devtools-action-btn:hover { background: var(--bg-btn-hover, #e0e0e0) !important; }
+            .devtools-resource-list { font-size: 11px !important; }
+            .devtools-resource-link {
+                display: block !important; padding: 5px 8px !important; color: var(--text-link, #0066cc) !important;
+                text-decoration: none !important; border-bottom: 1px solid var(--border-light, #eee) !important; word-break: break-all !important;
+            }
+            .devtools-resource-link:hover { background: var(--bg-hover, #f5f5f5) !important; }
+            .devtools-image-grid { display: grid !important; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)) !important; gap: 8px !important; }
+            .devtools-image-item { border: 1px solid var(--border-light, #eee) !important; padding: 4px !important; background: var(--bg-panel, #fff) !important; }
+            .devtools-image-item img { width: 100% !important; height: auto !important; display: block !important; }
+            .devtools-add-row {
+                margin-top: 8px !important; padding: 5px 10px !important; background: var(--bg-btn, #f0f0f0) !important;
+                border: 1px solid var(--border, #ccc) !important; border-radius: 3px !important; cursor: pointer !important; font-size: 11px !important;
+            }
+            .devtools-add-row:hover { background: var(--bg-btn-hover, #e0e0e0) !important; }
+
+            /* 工具面板样式 */
+            .devtools-tools-wrapper { padding: 0 !important; height: 100% !important; display: flex !important; flex-direction: column !important; }
+            .devtools-tools-tabs {
+                display: flex !important; border-bottom: 1px solid var(--border-light, #eee) !important;
+                background: var(--bg-tabs, #fafafa) !important; flex-shrink: 0 !important; overflow-x: auto !important; flex-wrap: wrap !important;
+            }
+            .devtools-tools-tab {
+                padding: 8px 10px !important; color: var(--text-secondary, #666) !important; cursor: pointer !important;
+                font-size: 11px !important; border-bottom: 2px solid transparent !important; white-space: nowrap !important;
+                display: flex !important; align-items: center !important; gap: 4px !important;
+            }
+            .devtools-tools-tab:hover { color: var(--text-primary, #333) !important; }
+            .devtools-tools-tab.active {
+                color: var(--text-primary, #000) !important; border-bottom-color: var(--border-active, #000) !important; background: var(--bg-panel, #fff) !important;
+            }
+            .devtools-tools-content { flex: 1 !important; overflow: auto !important; padding: 8px !important; }
+
+            /* 通用输入框 */
+            .devtools-input-group { margin-bottom: 10px !important; }
+            .devtools-input-label { display: block !important; font-size: 11px !important; font-weight: 600 !important; margin-bottom: 4px !important; color: var(--text-primary, #333) !important; }
+            .devtools-textarea {
+                width: 100% !important; min-height: 70px !important; padding: 6px !important;
+                border: 1px solid var(--border, #ccc) !important; border-radius: 3px !important;
+                font-size: 11px !important; font-family: 'Consolas', 'Monaco', monospace !important;
+                background: var(--bg-panel, #fff) !important; color: var(--text-primary, #333) !important;
+                box-sizing: border-box !important; resize: vertical !important;
+            }
+            .devtools-textarea:focus { outline: none !important; border-color: var(--border-active, #0078d4) !important; }
+            .devtools-input {
+                width: 100% !important; padding: 5px 7px !important; border: 1px solid var(--border, #ccc) !important;
+                border-radius: 3px !important; font-size: 11px !important; font-family: 'Consolas', 'Monaco', monospace !important;
+                background: var(--bg-panel, #fff) !important; color: var(--text-primary, #333) !important; box-sizing: border-box !important;
+            }
+            .devtools-input:focus { outline: none !important; border-color: var(--border-active, #0078d4) !important; }
+
+            /* 工具按钮 */
+            .devtools-tool-btn {
+                padding: 5px 12px !important; background: var(--bg-btn, #f0f0f0) !important;
+                color: var(--text-primary, #333) !important; border: 1px solid var(--border, #ccc) !important;
+                border-radius: 3px !important; cursor: pointer !important; font-size: 11px !important;
+            }
+            .devtools-tool-btn:hover { background: var(--bg-btn-hover, #e0e0e0) !important; }
+            .devtools-tool-btn.primary { background: var(--bg-btn-active, #000) !important; color: white !important; border-color: var(--bg-btn-active, #000) !important; }
+            .devtools-tool-btn.primary:hover { opacity: 0.9 !important; }
+
+            /* 结果展示 */
+            .devtools-result-box {
+                margin-top: 10px !important; padding: 10px !important; background: var(--bg-hover, #f5f5f5) !important;
+                border: 1px solid var(--border-light, #eee) !important; border-radius: 3px !important;
+                font-family: 'Consolas', 'Monaco', monospace !important; font-size: 11px !important;
+                max-height: 200px !important; overflow: auto !important; white-space: pre-wrap !important;
+                word-break: break-all !important; color: var(--text-primary, #333) !important;
+            }
+            .devtools-result-box.error { background: var(--bg-error, #fff5f5) !important; color: var(--text-error, #c00) !important; border-color: var(--text-error, #c00) !important; }
+            .devtools-result-box.success { background: var(--bg-info, #f0f7ff) !important; color: var(--text-info, #0066cc) !important; }
+
+            /* 匹配高亮 */
+            .devtools-match { background: #ffff00 !important; color: #000 !important; padding: 0 2px !important; border-radius: 2px !important; }
+            .devtools-group { color: #0066cc !important; }
+
+            /* 选择器结果 */
+            .devtools-selector-result {
+                padding: 4px 8px !important; border-bottom: 1px solid var(--border-light, #eee) !important;
+                cursor: pointer !important; font-family: 'Consolas', 'Monaco', monospace !important; font-size: 10px !important;
+            }
+            .devtools-selector-result:hover { background: var(--bg-hover, #f5f5f5) !important; }
+            .devtools-selector-result.selected { background: var(--bg-selected, #000) !important; color: white !important; }
+
+            /* 深色主题 */
+            .devtools-sidebar.dark-theme {
+                --bg-sidebar: #1e1e1e; --bg-panel: #252526; --bg-header: #2d2d2d; --bg-tabs: #333333;
+                --bg-btn: #3c3c3c; --bg-btn-hover: #4c4c4c; --bg-btn-active: #0e639c; --bg-hover: #2a2d2e; --bg-selected: #094771;
+                --bg-details: #2d2d2d; --bg-warn: #454137; --bg-error: #4b1818; --bg-info: #0f3a60; --bg-success: #0f3a60;
+                --text-primary: #cccccc; --text-secondary: #969696; --text-tag: #9cdcfe; --text-attr: #9cdcfe;
+                --text-link: #3794ff; --text-warn: #dcdcaa; --text-error: #f44747; --text-info: #4ec9b0; --text-success: #6a9955;
+                --border: #454545; --border-light: #3c3c3c; --border-active: #0078d4; --bg-toggle: #333; --bg-toggle-hover: #1e1e1e; --text-toggle: white;
+            }
+
+            /* 元素长按上下文菜单 */
+            .devtools-context-menu {
+                position: fixed !important; z-index: 2147483648 !important;
+                background: var(--bg-panel, #fff) !important;
+                border: 1px solid var(--border, #ccc) !important;
+                border-radius: 4px !important;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
+                min-width: 180px !important;
+                padding: 4px 0 !important;
+                font-size: 12px !important;
+                font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif !important;
+                display: none !important;
+            }
+            .devtools-context-menu.show { display: block !important; }
+            .devtools-context-menu-item {
+                padding: 8px 14px !important;
+                cursor: pointer !important;
+                color: var(--text-primary, #333) !important;
+                white-space: nowrap !important;
+                user-select: none !important;
+                -webkit-user-select: none !important;
+            }
+            .devtools-context-menu-item:hover {
+                background: var(--bg-btn-active, #000) !important;
+                color: #fff !important;
+            }
+            .devtools-context-menu-item:active {
+                background: var(--bg-btn-hover, #333) !important;
+            }
+            .devtools-context-menu-sep {
+                height: 1px !important;
+                background: var(--border-light, #eee) !important;
+                margin: 4px 0 !important;
+            }
+            .devtools-context-menu-backdrop {
+                position: fixed !important; top: 0 !important; left: 0 !important;
+                width: 100% !important; height: 100% !important;
+                z-index: 2147483646 !important;
+                display: none !important;
+            }
+            .devtools-context-menu-backdrop.show { display: block !important; }
+
+            .devtools-body-pushed { margin-right: 520px !important; }
+        `;
+        document.head.appendChild(style);
+    }
+
+    // ============ UI 创建 ============
+    function createSidebar() {
+        // 开关按钮
+        const toggleBtn = document.createElement('button');
+        toggleBtn.className = 'devtools-toggle-btn';
+        toggleBtn.id = 'devtools-toggle-btn';
+        toggleBtn.innerHTML = SVG.menu;
+        toggleBtn.title = 'DevScope 开发者工具 (Ctrl+Shift+I)';
+        toggleBtn.addEventListener('click', toggleSidebar);
+        document.body.appendChild(toggleBtn);
+
+        const sidebar = document.createElement('div');
+        sidebar.className = 'devtools-sidebar';
+        sidebar.id = 'devtools-sidebar';
+
+        const header = document.createElement('div');
+        header.className = 'devtools-header';
+        header.innerHTML = `
+            <h3>DevScope 开发者工具</h3>
+            <div class="devtools-header-right">
+                <button class="devtools-theme-btn" id="devtools-theme-btn" title="切换主题">${SVG.moon}</button>
+                <button class="devtools-close-btn" id="devtools-close-btn" title="关闭">${SVG.close}</button>
+            </div>
+        `;
+        sidebar.appendChild(header);
+
+        const tabsContainer = document.createElement('div');
+        tabsContainer.className = 'devtools-tabs';
+        const tabs = [
+            { id: 'console', label: '控制台' },
+            { id: 'elements', label: '元素' },
+            { id: 'network', label: '网络' },
+            { id: 'tools', label: '工具' },
+            { id: 'resources', label: '资源' },
+            { id: 'performance', label: '性能' }
+        ];
+        tabs.forEach(tab => {
+            const tabBtn = document.createElement('div');
+            tabBtn.className = 'devtools-tab' + (tab.id === 'console' ? ' active' : '');
+            tabBtn.dataset.tab = tab.id;
+            tabBtn.innerHTML = tab.label;
+            tabBtn.addEventListener('click', () => switchTab(tab.id));
+            tabsContainer.appendChild(tabBtn);
+        });
+        sidebar.appendChild(tabsContainer);
+
+        const content = document.createElement('div');
+        content.className = 'devtools-content';
+
+        // 控制台面板
+        const consolePanel = document.createElement('div');
+        consolePanel.className = 'devtools-panel active';
+        consolePanel.id = 'devtools-panel-console';
+        consolePanel.innerHTML = `
+            <div class="devtools-console-wrapper">
+                <div class="devtools-console-header">
+                    <button class="devtools-console-btn active" data-filter="all">全部</button>
+                    <button class="devtools-console-btn active" data-filter="log">日志</button>
+                    <button class="devtools-console-btn active" data-filter="warn">警告</button>
+                    <button class="devtools-console-btn active" data-filter="error">错误</button>
+                    <button class="devtools-console-btn active" data-filter="info">信息</button>
+                    <input type="text" class="devtools-search-box" id="devtools-console-search" placeholder="搜索日志...">
+                    <button class="devtools-console-btn" id="devtools-console-clear">清除</button>
+                </div>
+                <div class="devtools-console-logs" id="devtools-console-logs"></div>
+                <div class="devtools-console-input-wrapper">
+                    <span style="color: #666; font-family: monospace; padding: 6px 0;">></span>
+                    <input type="text" class="devtools-console-input" id="devtools-console-input" placeholder="输入命令按Enter执行...">
+                </div>
+            </div>
+        `;
+        content.appendChild(consolePanel);
+
+        // 元素面板
+        const elementsPanel = document.createElement('div');
+        elementsPanel.className = 'devtools-panel';
+        elementsPanel.id = 'devtools-panel-elements';
+        elementsPanel.innerHTML = `
+            <div class="devtools-elements-wrapper">
+                <div class="devtools-elements-header">
+                    <button class="devtools-element-selector" id="devtools-element-selector-btn">选择元素</button>
+                    <button class="devtools-console-btn" id="devtools-elements-refresh">刷新树</button>
+                </div>
+                <div class="devtools-element-container">
+                    <div class="devtools-element-tree" id="devtools-element-tree"></div>
+                    <div class="devtools-element-inspector" id="devtools-element-inspector">
+                        <div class="devtools-inspector-title">元素信息</div>
+                        <div id="devtools-inspector-content">
+                            <div style="color: #999;">选择元素查看信息</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        content.appendChild(elementsPanel);
+
+        // 网络面板
+        const networkPanel = document.createElement('div');
+        networkPanel.className = 'devtools-panel';
+        networkPanel.id = 'devtools-panel-network';
+        networkPanel.innerHTML = `
+            <div class="devtools-network-wrapper">
+                <div class="devtools-network-header">
+                    <button class="devtools-console-btn" id="devtools-network-clear">清除</button>
+                    <button class="devtools-console-btn" id="devtools-network-pause">暂停</button>
+                </div>
+                <div class="devtools-network-details" id="devtools-network-details" style="display: none;"></div>
+                <div class="devtools-network-list-wrapper">
+                    <div id="devtools-network-list"></div>
+                </div>
+            </div>
+        `;
+        content.appendChild(networkPanel);
+
+        // 工具面板
+        const toolsPanel = document.createElement('div');
+        toolsPanel.className = 'devtools-panel';
+        toolsPanel.id = 'devtools-panel-tools';
+        toolsPanel.innerHTML = `
+            <div class="devtools-tools-wrapper">
+                <div class="devtools-tools-tabs">
+                    <div class="devtools-tools-tab active" data-tab="regex">正则</div>
+                    <div class="devtools-tools-tab" data-tab="selector">选择器</div>
+                    <div class="devtools-tools-tab" data-tab="json">JSON</div>
+                    <div class="devtools-tools-tab" data-tab="string">字符串</div>
+                    <div class="devtools-tools-tab" data-tab="request">请求</div>
+                </div>
+                <div class="devtools-tools-content" id="devtools-tools-content"></div>
+            </div>
+        `;
+        content.appendChild(toolsPanel);
+
+        // 资源面板
+        const resourcesPanel = document.createElement('div');
+        resourcesPanel.className = 'devtools-panel';
+        resourcesPanel.id = 'devtools-panel-resources';
+        resourcesPanel.innerHTML = `
+            <div class="devtools-resources-wrapper">
+                <div class="devtools-resource-tabs">
+                    <div class="devtools-resource-tab active" data-tab="local">本地存储</div>
+                    <div class="devtools-resource-tab" data-tab="session">会话存储</div>
+                    <div class="devtools-resource-tab" data-tab="cookie">Cookie</div>
+                    <div class="devtools-resource-tab" data-tab="ua">UserAgent</div>
+                    <div class="devtools-resource-tab" data-tab="script">脚本</div>
+                    <div class="devtools-resource-tab" data-tab="stylesheet">样式表</div>
+                    <div class="devtools-resource-tab" data-tab="iframe">框架</div>
+                    <div class="devtools-resource-tab" data-tab="image">图片</div>
+                    <div class="devtools-resource-tab" data-tab="cache">缓存</div>
+                </div>
+                <div class="devtools-resource-content" id="devtools-resource-content"></div>
+            </div>
+        `;
+        content.appendChild(resourcesPanel);
+
+        // 性能面板
+        const performancePanel = document.createElement('div');
+        performancePanel.className = 'devtools-panel';
+        performancePanel.id = 'devtools-panel-performance';
+        performancePanel.innerHTML = `
+            <div class="devtools-performance-wrapper">
+                <div class="devtools-resource-header">
+                    <span class="devtools-resource-title">性能信息</span>
+                    <button class="devtools-console-btn" id="devtools-performance-refresh">刷新</button>
+                </div>
+                <div id="devtools-performance-content"></div>
+            </div>
+        `;
+        content.appendChild(performancePanel);
+
+        sidebar.appendChild(content);
+        document.body.appendChild(sidebar);
+
+        const highlightOverlay = document.createElement('div');
+        highlightOverlay.className = 'devtools-highlight-overlay';
+        highlightOverlay.id = 'devtools-highlight-overlay';
+        highlightOverlay.style.display = 'none';
+        document.body.appendChild(highlightOverlay);
+
+        // 长按上下文菜单（修复语法错误）
+        const contextBackdrop = document.createElement('div');
+        contextBackdrop.className = 'devtools-context-menu-backdrop';
+        contextBackdrop.id = 'devtools-context-backdrop';
+        document.body.appendChild(contextBackdrop);
+
+        const contextMenu = document.createElement('div');
+        contextMenu.className = 'devtools-context-menu';
+        contextMenu.id = 'devtools-context-menu';
+        contextMenu.innerHTML = `
+            <div class="devtools-context-menu-item" data-action="copyElement">复制元素</div>
+            <div class="devtools-context-menu-item" data-action="copyOuterHTML">复制 outerHTML</div>
+            <div class="devtools-context-menu-item" data-action="copySelector">复制 selector</div>
+            <div class="devtools-context-menu-item" data-action="copyJSPath">复制 JS 路径</div>
+            <div class="devtools-context-menu-item" data-action="copyStyles">复制样式</div>
+            <div class="devtools-context-menu-sep"></div>
+            <div class="devtools-context-menu-item" data-action="copyXPath">复制 XPath</div>
+            <div class="devtools-context-menu-item" data-action="copyFullXPath">复制完整的 XPath</div>
+        `;
+        document.body.appendChild(contextMenu);
+
+        initEventListeners();
+    }
+
+    function initEventListeners() {
+        document.getElementById('devtools-theme-btn').addEventListener('click', toggleTheme);
+        document.getElementById('devtools-close-btn').addEventListener('click', toggleSidebar);
+
+        document.getElementById('devtools-console-search').addEventListener('input', (e) => {
+            searchQuery = e.target.value.toLowerCase();
+            renderLogs();
+        });
+
+        document.getElementById('devtools-console-clear').addEventListener('click', clearConsole);
+
+        const consoleInput = document.getElementById('devtools-console-input');
+        consoleInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                executeConsoleCommand(consoleInput.value);
+                consoleInput.value = '';
+            }
+        });
+
+        document.querySelectorAll('[data-filter]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (btn.dataset.filter === 'all') {
+                    const allActive = Object.values(activeLogFilters).every(v => v);
+                    Object.keys(activeLogFilters).forEach(key => activeLogFilters[key] = !allActive);
+                    document.querySelectorAll('[data-filter]').forEach(b => {
+                        b.classList.toggle('active', b.dataset.filter === 'all' ? !allActive : activeLogFilters[b.dataset.filter]);
+                    });
+                } else {
+                    activeLogFilters[btn.dataset.filter] = !activeLogFilters[btn.dataset.filter];
+                    btn.classList.toggle('active', activeLogFilters[btn.dataset.filter]);
+                }
+                renderLogs();
+            });
+        });
+
+        document.getElementById('devtools-element-selector-btn').addEventListener('click', toggleElementSelection);
+        document.getElementById('devtools-elements-refresh').addEventListener('click', () => {
+            elementTreeRendered = false;
+            renderElementTree();
+        });
+
+        document.getElementById('devtools-network-clear').addEventListener('click', clearNetwork);
+        let isNetworkPaused = false;
+        document.getElementById('devtools-network-pause').addEventListener('click', function() {
+            isNetworkPaused = !isNetworkPaused;
+            this.textContent = isNetworkPaused ? '继续' : '暂停';
+            window.__networkPaused = isNetworkPaused;
+        });
+
+        document.querySelectorAll('.devtools-tools-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.devtools-tools-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                activeToolTab = tab.dataset.tab;
+                renderToolContent();
+            });
+        });
+
+        document.querySelectorAll('.devtools-resource-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.devtools-resource-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                activeResourceTab = tab.dataset.tab;
+                renderResourceContent();
+            });
+        });
+
+        document.getElementById('devtools-performance-refresh').addEventListener('click', renderPerformanceContent);
+
+        initContextMenuEvents();
+    }
+
+    function toggleTheme() {
+        isDarkTheme = !isDarkTheme;
+        const sidebar = document.getElementById('devtools-sidebar');
+        const themeBtn = document.getElementById('devtools-theme-btn');
+        if (isDarkTheme) {
+            sidebar.classList.add('dark-theme');
+            themeBtn.innerHTML = SVG.sun;
+        } else {
+            sidebar.classList.remove('dark-theme');
+            themeBtn.innerHTML = SVG.moon;
+        }
+    }
+
+    function toggleSidebar() {
+        isOpen = !isOpen;
+        const sidebar = document.getElementById('devtools-sidebar');
+        const toggleBtn = document.getElementById('devtools-toggle-btn');
+        if (isOpen) {
+            sidebar.classList.add('open');
+            toggleBtn.classList.add('open');
+            toggleBtn.innerHTML = SVG.close;
+            document.body.classList.add('devtools-body-pushed');
+            if (activeTab === 'elements' && !elementTreeRendered) {
+                renderElementTree();
+                elementTreeRendered = true;
+            }
+            if (activeTab === 'tools') renderToolContent();
+            if (activeTab === 'resources') renderResourceContent();
+            if (activeTab === 'performance') renderPerformanceContent();
+        } else {
+            sidebar.classList.remove('open');
+            toggleBtn.classList.remove('open');
+            toggleBtn.innerHTML = SVG.menu;
+            document.body.classList.remove('devtools-body-pushed');
+            stopElementSelection();
+        }
+    }
+
+    function switchTab(tabId) {
+        activeTab = tabId;
+        document.querySelectorAll('.devtools-tab').forEach(tab => {
+            tab.classList.toggle('active', tab.dataset.tab === tabId);
+        });
+        document.querySelectorAll('.devtools-panel').forEach(panel => {
+            panel.classList.toggle('active', panel.id === 'devtools-panel-' + tabId);
+        });
+        if (tabId === 'elements' && !elementTreeRendered) {
+            renderElementTree();
+            elementTreeRendered = true;
+        }
+        if (tabId === 'tools') renderToolContent();
+        if (tabId === 'resources') renderResourceContent();
+        if (tabId === 'performance') renderPerformanceContent();
+    }
+
+    // ============ 控制台功能 ============
+    function hijackConsole() {
+        ['log', 'warn', 'error', 'info'].forEach(type => {
+            const original = console[type];
+            console[type] = function(...args) {
+                addLog(type, args);
+                original.apply(console, args);
+            };
+        });
+    }
+
+    function addLog(type, args) {
+        const message = args.map(arg => typeof arg === 'object' ? safeStringify(arg) : String(arg)).join(' ');
+        logs.push({ type, message, time: new Date().toLocaleTimeString(), id: 'log-' + Date.now() + Math.random() });
+        if (logs.length > 500) logs.shift();
+        renderLogs();
+    }
+
+    function renderLogs() {
+        const container = document.getElementById('devtools-console-logs');
+        if (!container) return;
+        const filtered = logs.filter(log => {
+            if (!activeLogFilters[log.type]) return false;
+            if (searchQuery && !log.message.toLowerCase().includes(searchQuery)) return false;
+            return true;
+        });
+        container.innerHTML = filtered.map(log => {
+            const isExpanded = expandedObjects.has(log.id);
+            const isObject = log.message.startsWith('{') || log.message.startsWith('[');
+            const displayMessage = isExpanded ?
+                '<pre style="margin: 4px 0 0 20px; white-space: pre-wrap; font-size: 11px;">' + escapeHtml(log.message) + '</pre>' :
+                escapeHtml(log.message.length > 500 ? log.message.slice(0, 500) + '...' : log.message);
+            const toggleHtml = isObject ? '<span class="devtools-log-toggle" onclick="event.stopPropagation();window.devtoolsToggleObject(\'' + log.id.replace(/'/g, "\\'") + '\')">' + (isExpanded ? '▼' : '▶') + '</span>' : '';
+            return '<div class="devtools-log-item ' + escapeHtml(log.type) + '"><span style="color:#666;margin-right:8px;font-size:10px;">[' + escapeHtml(log.time) + ']</span>' + toggleHtml + '<span>' + displayMessage + '</span></div>';
+        }).join('');
+        container.scrollTop = container.scrollHeight;
+    }
+
+    window.devtoolsToggleObject = function(id) {
+        if (expandedObjects.has(id)) {
+            expandedObjects.delete(id);
+        } else {
+            expandedObjects.add(id);
+        }
+        renderLogs();
+    };
+
+    function executeConsoleCommand(command) {
+        if (!command.trim()) return;
+        try {
+            const result = eval.call(window, command);
+            addLog('log', ['->', result]);
+        } catch (e) {
+            addLog('error', ['[错误]', e.toString()]);
+        }
+    }
+
+    function clearConsole() {
+        logs = [];
+        expandedObjects.clear();
+        renderLogs();
+    }
+
+    // ============ 网络监控 ============
+    function hijackNetwork() {
+        const originalFetch = window.fetch;
+        window.fetch = function(...args) {
+            if (window.__networkPaused) return originalFetch.apply(this, args);
+            const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
+            const method = (args[1]?.method) || 'GET';
+            const startTime = Date.now();
+            const id = Date.now() + Math.random().toString(36).substr(2, 9);
+            const requestData = {
+                id, method, url, status: 'pending', startTime, endTime: null, duration: null,
+                requestHeaders: args[1]?.headers ? safeStringify(args[1].headers) : null,
+                requestBody: args[1]?.body ? (typeof args[1].body === 'string' ? args[1].body : safeStringify(args[1].body)) : null
+            };
+            networkRequests.push(requestData);
+            if (networkRequests.length > 200) {
+                const removed = networkRequests.shift();
+                networkResponseMap.delete(removed.id);
+            }
+            renderNetworkRequests();
+            return originalFetch.apply(this, args).then(async response => {
+                const req = networkRequests.find(r => r.id === id);
+                if (req) {
+                    req.status = response.status;
+                    req.endTime = Date.now();
+                    req.duration = req.endTime - req.startTime;
+                    try {
+                        const cloned = response.clone();
+                        const text = await cloned.text();
+                        req.responseHeaders = safeStringify(Object.fromEntries(cloned.headers.entries()));
+                        req.responseBody = text;
+                        networkResponseMap.set(id, text);
+                    } catch {}
+                }
+                renderNetworkRequests();
+                return response;
+            }).catch(error => {
+                const req = networkRequests.find(r => r.id === id);
+                if (req) {
+                    req.status = '错误';
+                    req.endTime = Date.now();
+                    req.duration = req.endTime - req.startTime;
+                }
+                renderNetworkRequests();
+                throw error;
+            });
+        };
+
+        const originalOpen = XMLHttpRequest.prototype.open;
+        const originalSend = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.open = function(method, url) {
+            this._requestMethod = method;
+            this._requestUrl = url;
+            this._requestId = Date.now() + Math.random().toString(36).substr(2, 9);
+            return originalOpen.apply(this, arguments);
+        };
+        XMLHttpRequest.prototype.send = function(body) {
+            if (window.__networkPaused) return originalSend.apply(this, arguments);
+            const startTime = Date.now();
+            const id = this._requestId;
+            const requestData = {
+                id, method: this._requestMethod || 'GET', url: this._requestUrl,
+                status: 'pending', startTime, endTime: null, duration: null,
+                requestBody: body ? (typeof body === 'string' ? body : safeStringify(body)) : null
+            };
+            networkRequests.push(requestData);
+            if (networkRequests.length > 200) {
+                const removed = networkRequests.shift();
+                networkResponseMap.delete(removed.id);
+            }
+            renderNetworkRequests();
+            const self = this;
+            this.addEventListener('load', function() {
+                const req = networkRequests.find(r => r.id === id);
+                if (req) {
+                    req.status = self.status;
+                    req.endTime = Date.now();
+                    req.duration = req.endTime - req.startTime;
+                    req.responseBody = self.responseText;
+                    networkResponseMap.set(id, self.responseText);
+                    try {
+                        const headers = {};
+                        self.getAllResponseHeaders().split(/\r?\n/).forEach(line => {
+                            const parts = line.split(': ');
+                            if (parts.length > 1) headers[parts[0]] = parts[1];
+                        });
+                        req.responseHeaders = safeStringify(headers);
+                    } catch {}
+                }
+                renderNetworkRequests();
+            });
+            this.addEventListener('error', function() {
+                const req = networkRequests.find(r => r.id === id);
+                if (req) {
+                    req.status = '错误';
+                    req.endTime = Date.now();
+                    req.duration = req.endTime - req.startTime;
+                }
+                renderNetworkRequests();
+            });
+            return originalSend.apply(this, arguments);
+        };
+    }
+
+    function renderNetworkRequests() {
+        const container = document.getElementById('devtools-network-list');
+        if (!container) return;
+        container.innerHTML = networkRequests.map(req => {
+            const statusClass = req.status === 'pending' ? '' : (req.status >= 200 && req.status < 400 ? 'success' : 'error');
+            const statusText = req.status === 'pending' ? '...' : req.status;
+            const durationText = req.duration ? req.duration + 'ms' : '-';
+            return '<div class="devtools-network-item" onclick="window.devtoolsShowNetworkDetails(\'' + req.id.replace(/'/g, "\\'") + '\')"><span class="devtools-network-method">' + escapeHtml(req.method) + '</span><span class="devtools-network-url" title="' + escapeHtml(req.url) + '">' + escapeHtml(req.url.length > 80 ? req.url.substring(0, 80) + '...' : req.url) + '</span><span class="devtools-network-status ' + statusClass + '">' + escapeHtml(statusText) + '</span><span class="devtools-network-time">' + escapeHtml(durationText) + '</span></div>';
+        }).join('');
+    }
+
+    window.devtoolsShowNetworkDetails = function(id) {
+        const req = networkRequests.find(r => r.id === id);
+        if (!req) return;
+        const detailsDiv = document.getElementById('devtools-network-details');
+        detailsDiv.style.display = 'block';
+
+        const urlDisplay = escapeHtml(req.url.length > 60 ? req.url.substring(0, 60) + '...' : req.url);
+        const summaryTab = '<div class="devtools-details-tab-content active" id="devtools-net-tab-summary"><div class="devtools-details-item"><div class="devtools-details-label">状态码</div><div class="devtools-details-value">' + escapeHtml(req.status) + '</div></div><div class="devtools-details-item"><div class="devtools-details-label">耗时</div><div class="devtools-details-value">' + escapeHtml(req.duration ? req.duration + 'ms' : '-') + '</div></div><div class="devtools-details-item"><div class="devtools-details-label">URL</div><div class="devtools-details-value">' + escapeHtml(req.url) + '</div></div></div>';
+        const requestTab = '<div class="devtools-details-tab-content" id="devtools-net-tab-request">' + (req.requestHeaders ? '<div class="devtools-details-item"><div class="devtools-details-label">请求头</div><div class="devtools-details-value"><pre style="margin:0;white-space:pre-wrap;font-size:10px;">' + escapeHtml(req.requestHeaders) + '</pre></div></div>' : '') + (req.requestBody ? '<div class="devtools-details-item"><div class="devtools-details-label">请求体</div><div class="devtools-details-value"><pre style="margin:0;white-space:pre-wrap;font-size:10px;">' + escapeHtml(req.requestBody) + '</pre></div></div>' : '') + '</div>';
+        const responseBodyDisplay = escapeHtml(req.responseBody && req.responseBody.length > 5000 ? req.responseBody.substring(0, 5000) + '\n\n[内容已截断...]' : (req.responseBody || ''));
+        const responseTab = '<div class="devtools-details-tab-content" id="devtools-net-tab-response">' + (req.responseHeaders ? '<div class="devtools-details-item"><div class="devtools-details-label">响应头</div><div class="devtools-details-value"><pre style="margin:0;white-space:pre-wrap;font-size:10px;">' + escapeHtml(req.responseHeaders) + '</pre></div></div>' : '') + (req.responseBody ? '<div class="devtools-details-item"><div class="devtools-details-label">响应体 (' + req.responseBody.length + ' 字符)</div><div class="devtools-details-value"><pre style="margin:0;white-space:pre-wrap;font-size:10px;max-height:200px;overflow:auto;">' + responseBodyDisplay + '</pre></div></div>' : '') + '</div>';
+
+        detailsDiv.innerHTML = '<div class="devtools-details-header"><span class="devtools-details-title">' + escapeHtml(req.method) + ' ' + urlDisplay + '</span><span class="devtools-details-close" onclick="window.devtoolsHideNetworkDetails()">×</span></div><div class="devtools-details-tabs"><div class="devtools-details-tab active" onclick="window.devtoolsSwitchNetTab(\'summary\',this)">概要</div><div class="devtools-details-tab" onclick="window.devtoolsSwitchNetTab(\'request\',this)">请求</div><div class="devtools-details-tab" onclick="window.devtoolsSwitchNetTab(\'response\',this)">响应</div></div>' + summaryTab + requestTab + responseTab;
+    };
+
+    window.devtoolsSwitchNetTab = function(tab, el) {
+        el.parentElement.querySelectorAll('.devtools-details-tab').forEach(t => t.classList.remove('active'));
+        el.classList.add('active');
+        el.parentElement.parentElement.querySelectorAll('.devtools-details-tab-content').forEach(c => c.classList.remove('active'));
+        document.getElementById('devtools-net-tab-' + tab).classList.add('active');
+    };
+
+    window.devtoolsHideNetworkDetails = function() {
+        document.getElementById('devtools-network-details').style.display = 'none';
+    };
+
+    function clearNetwork() {
+        networkRequests = [];
+        networkResponseMap.clear();
+        renderNetworkRequests();
+        document.getElementById('devtools-network-details').style.display = 'none';
+    }
+
+    // ============ 元素检查 ============
+    function renderElementTree() {
+        const container = document.getElementById('devtools-element-tree');
+        if (!container) return;
+        totalNodesRendered = 0;
+        container.innerHTML = renderTreeNode(document.documentElement, 0);
+        if (totalNodesRendered >= MAX_NODES) {
+            container.innerHTML += '<div style="padding:8px;color:#999;font-size:11px;text-align:center;">已限制显示 ' + MAX_NODES + ' 个节点</div>';
+        }
+        setupTreeEvents();
+        applyExpandedState();
+    }
+
+    function renderTreeNode(element, level) {
+        const tagName = element.tagName?.toLowerCase() || '';
+        if (!tagName || level > 10 || totalNodesRendered >= MAX_NODES) return '';
+        totalNodesRendered++;
+        const hasChildren = element.children && element.children.length > 0 && level < 10;
+        const elementId = getElementId(element);
+        const isExpanded = expandedNodes.has(elementId);
+        const attrs = getAttributes(element);
+        let html = `<div class="devtools-tree-node" data-element-id="${elementId}" data-level="${level}">${hasChildren?`<span class="devtools-tree-toggle">${isExpanded?'▼':'▶'}</span>`:'<span class="devtools-tree-toggle"> </span>'}<span class="devtools-tag-name">&lt;${tagName}</span>${attrs}<span class="devtools-tag-name">&gt;</span></div>`;
+        if (hasChildren) {
+            html += `<div class="devtools-tree-children ${isExpanded?'open':''}">`;
+            const maxChildren = Math.min(element.children.length, 100);
+            for (let i = 0; i < maxChildren; i++) {
+                if (totalNodesRendered < MAX_NODES) {
+                    html += renderTreeNode(element.children[i], level + 1);
+                }
+            }
+            if (element.children.length > maxChildren) {
+                html += `<div style="padding:2px 4px;color:#999;font-size:10px;">还有 ${element.children.length - maxChildren} 个子节点</div>`;
+            }
+            html += `</div>`;
+        }
+        return html;
+    }
+
+    function getAttributes(element) {
+        let attrs = '';
+        const limit = Math.min(element.attributes.length, 8);
+        for (let i = 0; i < limit; i++) {
+            const attr = element.attributes[i];
+            const val = attr.value.length > 50 ? attr.value.substring(0, 50) + '...' : attr.value;
+            attrs += ` <span class="devtools-attr-name">${escapeHtml(attr.name)}</span>=<span class="devtools-attr-value">"${escapeHtml(val)}"</span>`;
+        }
+        return attrs;
+    }
+
+    function getElementId(element) {
+        if (!element.__devtoolsId) element.__devtoolsId = 'el-' + (++elementIdCounter);
+        return element.__devtoolsId;
+    }
+
+    function setupTreeEvents() {
+        document.querySelectorAll('.devtools-tree-node').forEach(node => {
+            node.addEventListener('touchstart', (e) => {
+                longPressTriggered = false;
+                const id = node.dataset.elementId;
+                const element = findElementById(id);
+                if (!element) return;
+                longPressTimer = setTimeout(() => {
+                    longPressTriggered = true;
+                    highlightElement(element);
+                    selectTreeNode(node);
+                    renderElementInspector(element);
+                    showContextMenu(e.touches[0].clientX, e.touches[0].clientY, element);
+                }, 500);
+            }, { passive: true });
+
+            node.addEventListener('touchend', (e) => {
+                clearTimeout(longPressTimer);
+                if (longPressTriggered) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            });
+            node.addEventListener('touchmove', () => {
+                clearTimeout(longPressTimer);
+            }, { passive: true });
+
+            node.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const id = node.dataset.elementId;
+                const element = findElementById(id);
+                if (element) {
+                    highlightElement(element);
+                    selectTreeNode(node);
+                    renderElementInspector(element);
+                    showContextMenu(e.clientX, e.clientY, element);
+                }
+            });
+
+            node.addEventListener('click', (e) => {
+                if (longPressTriggered) { longPressTriggered = false; return; }
+                e.stopPropagation();
+                const id = node.dataset.elementId;
+                const element = findElementById(id);
+                if (element) {
+                    highlightElement(element);
+                    selectTreeNode(node);
+                    renderElementInspector(element);
+                }
+                const toggle = node.querySelector('.devtools-tree-toggle');
+                const children = node.nextElementSibling;
+                if (toggle && children && children.classList.contains('devtools-tree-children')) {
+                    if (toggle.textContent === '▶') {
+                        toggle.textContent = '▼';
+                        children.classList.add('open');
+                        expandedNodes.add(id);
+                    } else {
+                        toggle.textContent = '▶';
+                        children.classList.remove('open');
+                        expandedNodes.delete(id);
+                    }
+                }
+            });
+        });
+    }
+
+    // ============ 长按上下文菜单 ============
+    function showContextMenu(x, y, element) {
+        window.__contextElement = element;
+        const menu = document.getElementById('devtools-context-menu');
+        const backdrop = document.getElementById('devtools-context-backdrop');
+        if (!menu || !backdrop) return;
+
+        menu.classList.add('show');
+        backdrop.classList.add('show');
+        const menuRect = menu.getBoundingClientRect();
+        const menuW = menu.offsetWidth;
+        const menuH = menu.offsetHeight;
+        const winW = window.innerWidth;
+        const winH = window.innerHeight;
+
+        let posX = x;
+        let posY = y;
+        if (x + menuW > winW) posX = winW - menuW - 4;
+        if (y + menuH > winH) posY = winH - menuH - 4;
+        if (posX < 0) posX = 4;
+        if (posY < 0) posY = 4;
+
+        menu.style.left = posX + 'px';
+        menu.style.top = posY + 'px';
+    }
+
+    function hideContextMenu() {
+        const menu = document.getElementById('devtools-context-menu');
+        const backdrop = document.getElementById('devtools-context-backdrop');
+        if (menu) menu.classList.remove('show');
+        if (backdrop) backdrop.classList.remove('show');
+        window.__contextElement = null;
+    }
+
+    function initContextMenuEvents() {
+        const backdrop = document.getElementById('devtools-context-backdrop');
+        if (backdrop) {
+            backdrop.addEventListener('click', hideContextMenu);
+            backdrop.addEventListener('touchstart', hideContextMenu, { passive: true });
+        }
+
+        const menu = document.getElementById('devtools-context-menu');
+        if (!menu) return;
+
+        menu.querySelectorAll('.devtools-context-menu-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const action = item.dataset.action;
+                const el = window.__contextElement;
+                if (el) performCopyAction(action, el);
+                hideContextMenu();
+            });
+        });
+    }
+
+    function performCopyAction(action, element) {
+        let text = '';
+        try {
+            switch (action) {
+                case 'copyElement':
+                case 'copyOuterHTML':
+                    text = element.outerHTML;
+                    break;
+                case 'copySelector':
+                    text = getUniqueSelector(element);
+                    break;
+                case 'copyJSPath':
+                    text = getJSPath(element);
+                    break;
+                case 'copyStyles':
+                    text = getComputedStyles(element);
+                    break;
+                case 'copyXPath':
+                    text = getXPath(element, false);
+                    break;
+                case 'copyFullXPath':
+                    text = getXPath(element, true);
+                    break;
+            }
+        } catch (e) {
+            text = '获取失败: ' + e.message;
+        }
+        if (text) copyToClipboard(text);
+    }
+
+    function copyToClipboard(text) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(() => {
+                showToast('已复制');
+            }).catch(() => {
+                fallbackCopy(text);
+            });
+        } else {
+            fallbackCopy(text);
+        }
+    }
+
+    function fallbackCopy(text) {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;';
+        document.body.appendChild(textarea);
+        textarea.select();
+        textarea.setSelectionRange(0, textarea.value.length);
+        try {
+            document.execCommand('copy');
+            showToast('已复制');
+        } catch (e) {
+            showToast('复制失败');
+        }
+        document.body.removeChild(textarea);
+    }
+
+    function showToast(msg) {
+        const existing = document.getElementById('devtools-toast');
+        if (existing) existing.remove();
+        const toast = document.createElement('div');
+        toast.id = 'devtools-toast';
+        toast.textContent = msg;
+        toast.style.cssText = 'position:fixed;bottom:60px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.8);color:#fff;padding:8px 20px;border-radius:20px;font-size:12px;z-index:2147483648;pointer-events:none;transition:opacity 0.3s;font-family:sans-serif;';
+        document.body.appendChild(toast);
+        setTimeout(() => { toast.style.opacity = '0'; }, 1200);
+        setTimeout(() => { toast.remove(); }, 1500);
+    }
+
+    // ============ 复制功能实现 ============
+    function getUniqueSelector(el) {
+        if (el.id) return '#' + CSS.escape(el.id);
+        if (el === document.body) return 'body';
+        if (el === document.documentElement) return 'html';
+        const path = [];
+        let current = el;
+        while (current && current !== document.documentElement) {
+            let selector = current.tagName.toLowerCase();
+            if (current.id) {
+                selector = '#' + CSS.escape(current.id);
+                path.unshift(selector);
+                break;
+            }
+            if (current.className && typeof current.className === 'string') {
+                const classes = current.className.trim().split(/\s+/).filter(c => c && !c.startsWith('__'));
+                if (classes.length > 0) {
+                    selector += '.' + classes.map(c => CSS.escape(c)).join('.');
+                }
+            }
+            const parent = current.parentElement;
+            if (parent) {
+                const siblings = Array.from(parent.children).filter(s => s.tagName === current.tagName);
+                if (siblings.length > 1) {
+                    const index = siblings.indexOf(current) + 1;
+                    selector += ':nth-of-type(' + index + ')';
+                }
+            }
+            path.unshift(selector);
+            current = current.parentElement;
+        }
+        return path.join(' > ');
+    }
+
+    function getJSPath(el) {
+        if (el === document.documentElement) return 'document.documentElement';
+        if (el === document.body) return 'document.body';
+        if (el.id) return "document.getElementById('" + el.id + "')";
+        const path = [];
+        let current = el;
+        while (current && current !== document.documentElement && current !== document.body) {
+            let segment = '';
+            const parent = current.parentElement;
+            if (!parent) break;
+            if (current.id) {
+                segment = "document.getElementById('" + current.id + "')";
+                path.unshift(segment);
+                break;
+            }
+            const children = Array.from(parent.children);
+            const index = children.indexOf(current);
+            segment = '.children[' + index + ']';
+            path.unshift(segment);
+            current = parent;
+        }
+        let base = 'document';
+        if (current === document.body) base = 'document.body';
+        else if (current === document.documentElement) base = 'document.documentElement';
+        return base + path.join('');
+    }
+
+    function getComputedStyles(el) {
+        const computed = window.getComputedStyle(el);
+        const importantProps = [
+            'display', 'position', 'width', 'height', 'margin', 'padding',
+            'background', 'background-color', 'color', 'font-size', 'font-weight',
+            'font-family', 'line-height', 'text-align', 'border', 'border-radius',
+            'box-shadow', 'opacity', 'z-index', 'overflow', 'flex-direction',
+            'justify-content', 'align-items', 'gap', 'top', 'left', 'right', 'bottom',
+            'transform', 'transition', 'max-width', 'min-width', 'max-height', 'min-height'
+        ];
+        const lines = [];
+        importantProps.forEach(prop => {
+            const val = computed.getPropertyValue(prop);
+            if (val && val !== 'none' && val !== 'normal' && val !== '0px' && val !== 'auto') {
+                lines.push(prop + ': ' + val + ';');
+            }
+        });
+        return lines.join('\n');
+    }
+
+    function getXPath(el, full) {
+        if (el === document.documentElement) return '/html';
+        if (el === document.body) return full ? '/html/body' : '//body';
+        const parts = [];
+        let current = el;
+        while (current && current !== document.documentElement) {
+            let index = 1;
+            let hasSameTagSiblings = false;
+            const parent = current.parentElement;
+            if (parent) {
+                const siblings = parent.children;
+                for (let i = 0; i < siblings.length; i++) {
+                    if (siblings[i] === current) break;
+                    if (siblings[i].tagName === current.tagName) index++;
+                }
+                hasSameTagSiblings = parent.querySelectorAll(':scope > ' + current.tagName).length > 1;
+            }
+            const tag = current.tagName.toLowerCase();
+            const part = hasSameTagSiblings ? tag + '[' + index + ']' : tag;
+            parts.unshift(part);
+            current = current.parentElement;
+        }
+        parts.unshift('html');
+        if (full) return '/' + parts.join('/');
+        const bodyIdx = parts.indexOf('body');
+        if (bodyIdx >= 0) return '//' + parts.slice(bodyIdx).join('/');
+        return '//' + parts.join('/');
+    }
+
+    function findElementById(id) {
+        for (const el of document.querySelectorAll('*')) {
+            if (el.__devtoolsId === id) return el;
+        }
+        return null;
+    }
+
+    function applyExpandedState() {
+        document.querySelectorAll('.devtools-tree-node').forEach(node => {
+            const id = node.dataset.elementId;
+            const children = node.nextElementSibling;
+            const toggle = node.querySelector('.devtools-tree-toggle');
+            if (expandedNodes.has(id) && children && children.classList.contains('devtools-tree-children')) {
+                children.classList.add('open');
+                if (toggle) toggle.textContent = '▼';
+            }
+        });
+    }
+
+    function selectTreeNode(node) {
+        document.querySelectorAll('.devtools-tree-node').forEach(n => n.classList.remove('selected'));
+        node.classList.add('selected');
+    }
+
+    function highlightElement(element) {
+        const overlay = document.getElementById('devtools-highlight-overlay');
+        if (!element || !overlay) return;
+        const rect = element.getBoundingClientRect();
+        overlay.style.display = 'block';
+        overlay.style.top = rect.top + window.scrollY + 'px';
+        overlay.style.left = rect.left + window.scrollX + 'px';
+        overlay.style.width = rect.width + 'px';
+        overlay.style.height = rect.height + 'px';
+        selectedElement = element;
+    }
+
+    function renderElementInspector(element) {
+        const container = document.getElementById('devtools-inspector-content');
+        if (!container) return;
+        let html = '<div class="devtools-inspector-section">';
+        html += '<div class="devtools-inspector-title" style="margin-bottom:8px;">基本信息</div>';
+        html += `<div class="devtools-inspector-prop"><span class="devtools-inspector-key">标签:</span><span class="devtools-inspector-val">&lt;${element.tagName.toLowerCase()}&gt;</span></div>`;
+        html += `<div class="devtools-inspector-prop"><span class="devtools-inspector-key">id:</span><span class="devtools-inspector-val">${element.id || '-'}</span></div>`;
+        html += `<div class="devtools-inspector-prop"><span class="devtools-inspector-key">class:</span><span class="devtools-inspector-val">${element.className || '-'}</span></div>`;
+        html += `<div class="devtools-inspector-prop"><span class="devtools-inspector-key">位置:</span><span class="devtools-inspector-val">${Math.round(element.getBoundingClientRect().left)}, ${Math.round(element.getBoundingClientRect().top)}</span></div>`;
+        html += `<div class="devtools-inspector-prop"><span class="devtools-inspector-key">尺寸:</span><span class="devtools-inspector-val">${Math.round(element.offsetWidth)}×${Math.round(element.offsetHeight)}</span></div>`;
+        html += '</div>';
+        if (element.attributes.length > 0) {
+            html += '<div class="devtools-inspector-section">';
+            html += '<div class="devtools-inspector-title" style="margin-bottom:8px;">属性</div>';
+            for (let i = 0; i < Math.min(element.attributes.length, 15); i++) {
+                const attr = element.attributes[i];
+                html += `<div class="devtools-inspector-prop"><span class="devtools-inspector-key">${escapeHtml(attr.name)}:</span><span class="devtools-inspector-val">${escapeHtml(attr.value.length>100?attr.value.substring(0,100)+'...':attr.value)}</span></div>`;
+            }
+            html += '</div>';
+        }
+        if (element.textContent) {
+            html += '<div class="devtools-inspector-section">';
+            html += '<div class="devtools-inspector-title" style="margin-bottom:8px;">文本内容</div>';
+            const text = element.textContent.trim();
+            html += `<div style="word-break:break-all;font-size:10px;">${escapeHtml(text.length>200?text.substring(0,200)+'...':text)}</div>`;
+            html += '</div>';
+        }
+        container.innerHTML = html;
+    }
+
+    function toggleElementSelection() {
+        if (isSelectingElement) stopElementSelection();
+        else startElementSelection();
+    }
+
+    function startElementSelection() {
+        stopElementSelection();
+        isSelectingElement = true;
+        document.body.style.cursor = 'crosshair';
+        const btn = document.getElementById('devtools-element-selector-btn');
+        if (btn) btn.classList.add('active');
+        document.addEventListener('mousemove', onElementHoverMove, true);
+        document.addEventListener('click', onElementClick, true);
+        document.addEventListener('keydown', onEscapeKeydown);
+    }
+
+    function stopElementSelection() {
+        if (!isSelectingElement) return;
+        isSelectingElement = false;
+        document.body.style.cursor = '';
+        const btn = document.getElementById('devtools-element-selector-btn');
+        if (btn) btn.classList.remove('active');
+        document.removeEventListener('mousemove', onElementHoverMove, true);
+        document.removeEventListener('click', onElementClick, true);
+        document.removeEventListener('keydown', onEscapeKeydown);
+        const overlay = document.getElementById('devtools-highlight-overlay');
+        if (overlay) overlay.style.display = 'none';
+    }
+
+    function onEscapeKeydown(e) { if (e.key === 'Escape') stopElementSelection(); }
+
+    function onElementHoverMove(e) {
+        if (!isSelectingElement) return;
+        if (e.target.closest && (e.target.closest('#devtools-sidebar') || e.target.closest('#devtools-toggle-btn'))) return;
+        if (window.__highlightRaf) cancelAnimationFrame(window.__highlightRaf);
+        window.__highlightRaf = requestAnimationFrame(() => highlightElement(e.target));
+    }
+
+    function onElementClick(e) {
+        if (!isSelectingElement) return;
+        if (e.target.closest && (e.target.closest('#devtools-sidebar') || e.target.closest('#devtools-toggle-btn'))) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const element = e.target;
+        try {
+            highlightElement(element);
+            if (!elementTreeRendered) { renderElementTree(); elementTreeRendered = true; }
+            scrollToElementInTree(element);
+            renderElementInspector(element);
+            if (activeTab !== 'elements') switchTab('elements');
+        } catch (err) { console.error('元素定位失败:', err); }
+        setTimeout(() => stopElementSelection(), 300);
+    }
+
+    function scrollToElementInTree(element) {
+        const elementId = element.__devtoolsId;
+        if (!elementId) return;
+        const node = document.querySelector('.devtools-tree-node[data-element-id="' + elementId + '"]');
+        if (!node) return;
+        expandParentNodes(node);
+        node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        selectTreeNode(node);
+    }
+
+    function expandParentNodes(node) {
+        let count = 0;
+        let parent = node.parentElement;
+        while (parent && parent.classList.contains('devtools-tree-children') && count < 15) {
+            parent.classList.add('open');
+            const prevSibling = parent.previousElementSibling;
+            if (prevSibling && prevSibling.classList.contains('devtools-tree-node')) {
+                const toggle = prevSibling.querySelector('.devtools-tree-toggle');
+                if (toggle) toggle.textContent = '▼';
+                expandedNodes.add(prevSibling.dataset.elementId);
+            }
+            parent = parent.parentElement;
+            count++;
+        }
+    }
+
+    // ============ 工具面板 ============
+    function renderToolContent() {
+        const container = document.getElementById('devtools-tools-content');
+        if (!container) return;
+        switch (activeToolTab) {
+            case 'regex': renderRegexTool(); break;
+            case 'selector': renderSelectorTool(); break;
+            case 'json': renderJsonTool(); break;
+            case 'string': renderStringTool(); break;
+            case 'request': renderRequestTool(); break;
+        }
+    }
+
+    function renderRegexTool() {
+        const container = document.getElementById('devtools-tools-content');
+        container.innerHTML = '<div class="devtools-input-group"><label class="devtools-input-label">正则表达式</label><input type="text" class="devtools-input" id="devtools-regex-pattern" placeholder="例如: \\d+ 或 /\\w+/gi"></div><div class="devtools-input-group"><label class="devtools-input-label">测试文本</label><textarea class="devtools-textarea" id="devtools-regex-text" placeholder="输入要测试的文本..."></textarea></div><button class="devtools-tool-btn primary" onclick="window.devtoolsTestRegex()">测试</button><div id="devtools-regex-result"></div>';
+    }
+
+    window.devtoolsTestRegex = function() {
+        const pattern = document.getElementById('devtools-regex-pattern').value;
+        const text = document.getElementById('devtools-regex-text').value;
+        const resultDiv = document.getElementById('devtools-regex-result');
+        if (!pattern || !text) {
+            resultDiv.innerHTML = '<div class="devtools-result-box error">请输入正则表达式和测试文本</div>';
+            return;
+        }
+        try {
+            let regex;
+            if (pattern.startsWith('/') && pattern.lastIndexOf('/') > 0) {
+                const parts = pattern.match(/^\/(.+)\/([gimsuy]*)$/);
+                if (parts) regex = new RegExp(parts[1], parts[2]);
+                else regex = new RegExp(pattern);
+            } else {
+                regex = new RegExp(pattern, 'g');
+            }
+            const matches = [];
+            let match;
+            while ((match = regex.exec(text)) !== null) {
+                matches.push({ full: match[0], index: match.index, groups: match.slice(1) });
+                if (matches.length > 100) break;
+            }
+            if (matches.length === 0) {
+                resultDiv.innerHTML = '<div class="devtools-result-box">无匹配结果</div>';
+                return;
+            }
+            let html = '<div class="devtools-result-box success">找到 ' + matches.length + ' 个匹配：</div><br>';
+            matches.forEach((m, i) => {
+                html += '<div style="margin-bottom:8px;padding:8px;background:#f5f5f5;border-radius:3px;"><div><strong>匹配 ' + (i + 1) + ':</strong> <span class="devtools-match">' + escapeHtml(m.full) + '</span></div><div>位置: ' + m.index + '</div>' + (m.groups.length > 0 ? '<div>捕获组: ' + m.groups.map((g, j) => '<span class="devtools-group">[' + (j + 1) + '] ' + escapeHtml(g || '空') + '</span>').join(' ') + '</div>' : '') + '<div style="margin-top:4px;font-size:10px;color:#999;">上下文: ...' + escapeHtml(text.substring(Math.max(0, m.index - 20), m.index)) + '<span class="devtools-match">' + escapeHtml(m.full) + '</span>' + escapeHtml(text.substring(m.index + m.full.length, Math.min(text.length, m.index + m.full.length + 20))) + '...</div></div>';
+            });
+            resultDiv.innerHTML = html;
+        } catch (e) {
+            resultDiv.innerHTML = '<div class="devtools-result-box error">正则表达式错误: ' + escapeHtml(e.message) + '</div>';
+        }
+    };
+
+    function renderSelectorTool() {
+        const container = document.getElementById('devtools-tools-content');
+        container.innerHTML = '<div class="devtools-input-group"><label class="devtools-input-label">CSS选择器或XPath</label><input type="text" class="devtools-input" id="devtools-selector-input" placeholder="例如: div.content 或 //div[@class=\'content\']"></div><div style="margin-bottom:10px;"><button class="devtools-tool-btn primary" onclick="window.devtoolsTestSelector()">查询</button><button class="devtools-tool-btn" onclick="window.devtoolsClearSelectorHighlight()">清除高亮</button></div><div id="devtools-selector-result"></div>';
+    }
+
+    window.devtoolsTestSelector = function() {
+        const input = document.getElementById('devtools-selector-input').value.trim();
+        const resultDiv = document.getElementById('devtools-selector-result');
+        if (!input) {
+            resultDiv.innerHTML = '<div class="devtools-result-box error">请输入选择器</div>';
+            return;
+        }
+        try {
+            let elements = [];
+            if (input.startsWith('//') || input.startsWith('./') || input.startsWith('../')) {
+                elements = document.evaluate(input, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+                elements = Array.from({ length: elements.snapshotLength }, (_, i) => elements.snapshotItem(i));
+            } else {
+                elements = document.querySelectorAll(input);
+            }
+            window.__selectorElements = elements;
+            if (elements.length === 0) {
+                resultDiv.innerHTML = '<div class="devtools-result-box">无匹配元素</div>';
+                return;
+            }
+            let html = '<div class="devtools-result-box success">找到 ' + elements.length + ' 个元素：</div><br>';
+            Array.from(elements).forEach((el, i) => {
+                const tag = el.tagName.toLowerCase();
+                const id = el.id ? '#' + el.id : '';
+                const cls = el.className && typeof el.className === 'string' ? '.' + el.className.split(' ')[0] : '';
+                html += '<div class="devtools-selector-result" onclick="window.devtoolsHighlightSelectorElement(this, ' + i + ')" data-index="' + i + '">[' + (i + 1) + '] &lt;' + tag + id + cls + '&gt; - ' + escapeHtml(el.textContent.substring(0, 50)) + '...</div>';
+            });
+            resultDiv.innerHTML = html;
+        } catch (e) {
+            resultDiv.innerHTML = '<div class="devtools-result-box error">选择器错误: ' + escapeHtml(e.message) + '</div>';
+        }
+    };
+
+    window.devtoolsHighlightSelectorElement = function(el, index) {
+        document.querySelectorAll('.devtools-selector-result').forEach(e => e.classList.remove('selected'));
+        el.classList.add('selected');
+        const element = window.__selectorElements && window.__selectorElements[index];
+        if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            highlightElement(element);
+        }
+    };
+
+    window.devtoolsClearSelectorHighlight = function() {
+        const overlay = document.getElementById('devtools-highlight-overlay');
+        if (overlay) overlay.style.display = 'none';
+        document.getElementById('devtools-selector-result').innerHTML = '';
+    };
+
+    function renderJsonTool() {
+        const container = document.getElementById('devtools-tools-content');
+        container.innerHTML = '<div class="devtools-input-group"><label class="devtools-input-label">输入JSON</label><textarea class="devtools-textarea" id="devtools-json-input" placeholder="粘贴JSON文本..."></textarea></div><div style="margin-bottom:10px;"><button class="devtools-tool-btn primary" onclick="window.devtoolsFormatJson()">格式化</button><button class="devtools-tool-btn" onclick="window.devtoolsMinifyJson()">压缩</button><button class="devtools-tool-btn" onclick="window.devtoolsCopyJson()">复制</button></div><div id="devtools-json-result"></div>';
+    }
+
+    window.devtoolsFormatJson = function() {
+        const input = document.getElementById('devtools-json-input').value;
+        const resultDiv = document.getElementById('devtools-json-result');
+        try {
+            const parsed = JSON.parse(input);
+            const formatted = JSON.stringify(parsed, null, 2);
+            resultDiv.innerHTML = '<div class="devtools-result-box"><pre style="margin:0;white-space:pre-wrap;font-size:10px;">' + escapeHtml(formatted) + '</pre></div>';
+            window.__formattedJson = formatted;
+        } catch (e) {
+            resultDiv.innerHTML = '<div class="devtools-result-box error">JSON解析错误: ' + escapeHtml(e.message) + '</div>';
+        }
+    };
+
+    window.devtoolsMinifyJson = function() {
+        const input = document.getElementById('devtools-json-input').value;
+        const resultDiv = document.getElementById('devtools-json-result');
+        try {
+            const parsed = JSON.parse(input);
+            const minified = JSON.stringify(parsed);
+            resultDiv.innerHTML = '<div class="devtools-result-box"><pre style="margin:0;white-space:pre-wrap;word-break:break-all;font-size:10px;">' + escapeHtml(minified) + '</pre></div>';
+            window.__formattedJson = minified;
+        } catch (e) {
+            resultDiv.innerHTML = '<div class="devtools-result-box error">JSON解析错误: ' + escapeHtml(e.message) + '</div>';
+        }
+    };
+
+    window.devtoolsCopyJson = function() {
+        if (window.__formattedJson) {
+            navigator.clipboard.writeText(window.__formattedJson).then(() => alert('已复制！')).catch(() => alert('复制失败'));
+        } else {
+            const input = document.getElementById('devtools-json-input').value;
+            try {
+                const parsed = JSON.parse(input);
+                const formatted = JSON.stringify(parsed, null, 2);
+                navigator.clipboard.writeText(formatted).then(() => alert('已复制！')).catch(() => alert('复制失败'));
+            } catch (e) {
+                alert('无效的JSON');
+            }
+        }
+    };
+
+    function renderStringTool() {
+        const container = document.getElementById('devtools-tools-content');
+        container.innerHTML = '<div class="devtools-input-group"><label class="devtools-input-label">输入字符串</label><textarea class="devtools-textarea" id="devtools-string-input" placeholder="输入要处理的字符串..."></textarea></div><div class="devtools-string-tools"><button class="devtools-tool-btn" onclick="window.devtoolsStringOp(\'base64Encode\')">Base64编码</button><button class="devtools-tool-btn" onclick="window.devtoolsStringOp(\'base64Decode\')">Base64解码</button><button class="devtools-tool-btn" onclick="window.devtoolsStringOp(\'urlEncode\')">URL编码</button><button class="devtools-tool-btn" onclick="window.devtoolsStringOp(\'urlDecode\')">URL解码</button><button class="devtools-tool-btn" onclick="window.devtoolsStringOp(\'htmlEncode\')">HTML编码</button><button class="devtools-tool-btn" onclick="window.devtoolsStringOp(\'htmlDecode\')">HTML解码</button><button class="devtools-tool-btn" onclick="window.devtoolsStringOp(\'md5\')">MD5</button><button class="devtools-tool-btn" onclick="window.devtoolsStringOp(\'sha256\')">SHA256</button><button class="devtools-tool-btn" onclick="window.devtoolsStringOp(\'escapeUnicode\')">Unicode转义</button><button class="devtools-tool-btn" onclick="window.devtoolsStringOp(\'unescapeUnicode\')">Unicode还原</button></div><div id="devtools-string-result"></div>';
+    }
+
+    window.devtoolsStringOp = function(op) {
+        const input = document.getElementById('devtools-string-input').value;
+        const resultDiv = document.getElementById('devtools-string-result');
+        let result = '';
+        try {
+            switch (op) {
+                case 'base64Encode': result = btoa(unescape(encodeURIComponent(input))); break;
+                case 'base64Decode': result = decodeURIComponent(escape(atob(input))); break;
+                case 'urlEncode': result = encodeURIComponent(input); break;
+                case 'urlDecode': result = decodeURIComponent(input); break;
+                case 'htmlEncode': result = escapeHtml(input); break;
+                case 'htmlDecode': result = input.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/&amp;/g, '&'); break;
+                case 'md5': result = window.devtoolsMD5(input); break;
+                case 'sha256': window.devtoolsSha256(input).then(r => { resultDiv.innerHTML = '<div class="devtools-result-box success"><pre style="margin:0;word-break:break-all;font-size:10px;">' + escapeHtml(r) + '</pre></div>'; }); return;
+                case 'escapeUnicode': result = input.split('').map(c => c.charCodeAt(0) > 127 ? '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0') : c).join(''); break;
+                case 'unescapeUnicode': result = input.replace(/\\u([0-9a-fA-F]{4})/g, (_, p) => String.fromCharCode(parseInt(p, 16))); break;
+            }
+            resultDiv.innerHTML = '<div class="devtools-result-box success"><pre style="margin:0;word-break:break-all;font-size:10px;">' + escapeHtml(result) + '</pre></div>';
+            window.__stringResult = result;
+        } catch (e) {
+            resultDiv.innerHTML = '<div class="devtools-result-box error">操作失败: ' + escapeHtml(e.message) + '</div>';
+        }
+    };
+
+    window.devtoolsMD5 = function(string) {
+        function rotateLeft(lValue, iShiftBits) { return (lValue << iShiftBits) | (lValue >>> (32 - iShiftBits)); }
+        function addUnsigned(lX, lY) {
+            let lX4, lY4, lX8, lY8, lResult;
+            lX8 = (lX & 0x80000000); lY8 = (lY & 0x80000000);
+            lX4 = (lX & 0x40000000); lY4 = (lY & 0x40000000);
+            lResult = (lX & 0x3FFFFFFF) + (lY & 0x3FFFFFFF);
+            if (lX4 & lY4) return (lResult ^ 0x80000000 ^ lX8 ^ lY8);
+            if (lX4 | lY4) { if (lResult & 0x40000000) return (lResult ^ 0xC0000000 ^ lX8 ^ lY8); else return (lResult ^ 0x40000000 ^ lX8 ^ lY8); }
+            return (lResult ^ lX8 ^ lY8);
+        }
+        function F(x, y, z) { return (x & y) | ((~x) & z); }
+        function G(x, y, z) { return (x & z) | (y & (~z)); }
+        function H(x, y, z) { return (x ^ y ^ z); }
+        function I(x, y, z) { return (y ^ (x | (~z))); }
+        function FF(a, b, c, d, x, s, ac) { return addUnsigned(rotateLeft(addUnsigned(addUnsigned(a, F(b, c, d)), addUnsigned(x, ac)), s), b); }
+        function GG(a, b, c, d, x, s, ac) { return addUnsigned(rotateLeft(addUnsigned(addUnsigned(a, G(b, c, d)), addUnsigned(x, ac)), s), b); }
+        function HH(a, b, c, d, x, s, ac) { return addUnsigned(rotateLeft(addUnsigned(addUnsigned(a, H(b, c, d)), addUnsigned(x, ac)), s), b); }
+        function II(a, b, c, d, x, s, ac) { return addUnsigned(rotateLeft(addUnsigned(addUnsigned(a, I(b, c, d)), addUnsigned(x, ac)), s), b); }
+        function convertToWordArray(string) {
+            let lWordCount, lMessageLength = string.length, lNumberOfWordsTemp1 = lMessageLength + 8, lNumberOfWordsTemp2 = (lNumberOfWordsTemp1 - (lNumberOfWordsTemp1 % 64)) / 64, lNumberOfWords = (lNumberOfWordsTemp2 + 1) * 16, lWordArray = new Array(lNumberOfWords - 1), lBytePosition = 0, lByteCount = 0;
+            while (lByteCount < lMessageLength) { lWordCount = (lByteCount - (lByteCount % 4)) / 4; lBytePosition = (lByteCount % 4) * 8; lWordArray[lWordCount] = lWordArray[lWordCount] | (string.charCodeAt(lByteCount) << lBytePosition); lByteCount++; }
+            lWordCount = (lByteCount - (lByteCount % 4)) / 4; lBytePosition = (lByteCount % 4) * 8; lWordArray[lWordCount] = lWordArray[lWordCount] | (0x80 << lBytePosition);
+            lWordArray[lNumberOfWords - 2] = lMessageLength << 3; lWordArray[lNumberOfWords - 1] = lMessageLength >>> 29; return lWordArray;
+        }
+        function wordToHex(lValue) {
+            let wordToHexValue = '', wordToHexValueTemp = '', lByte, lForLoop = 0;
+            while (lForLoop <= 3) { lByte = (lValue >>> (lForLoop * 8)) & 255; wordToHexValueTemp = '0' + lByte.toString(16); wordToHexValue = wordToHexValue + wordToHexValueTemp.substr(wordToHexValueTemp.length - 2, 2); lForLoop++; }
+            return wordToHexValue;
+        }
+        let x = convertToWordArray(string), a = 0x67452301, b = 0xEFCDAB89, c = 0x98BADCFE, d = 0x10325476;
+        const S11 = 7, S12 = 12, S13 = 17, S14 = 22, S21 = 5, S22 = 9, S23 = 14, S24 = 20, S31 = 4, S32 = 11, S33 = 16, S34 = 23, S41 = 6, S42 = 10, S43 = 15, S44 = 21;
+        for (let k = 0; k < x.length; k += 16) {
+            let AA = a, BB = b, CC = c, DD = d;
+            a = FF(a, b, c, d, x[k], S11, 0xD76AA478); d = FF(d, a, b, c, x[k + 1], S12, 0xE8C7B756); c = FF(c, d, a, b, x[k + 2], S13, 0x242070DB); b = FF(b, c, d, a, x[k + 3], S14, 0xC1BDCEEE);
+            a = FF(a, b, c, d, x[k + 4], S11, 0xF57C0FAF); d = FF(d, a, b, c, x[k + 5], S12, 0x4787C62A); c = FF(c, d, a, b, x[k + 6], S13, 0xA8304613); b = FF(b, c, d, a, x[k + 7], S14, 0xFD469501);
+            a = FF(a, b, c, d, x[k + 8], S11, 0x698098D8); d = FF(d, a, b, c, x[k + 9], S12, 0x8B44F7AF); c = FF(c, d, a, b, x[k + 10], S13, 0xFFFF5BB1); b = FF(b, c, d, a, x[k + 11], S14, 0x895CD7BE);
+            a = FF(a, b, c, d, x[k + 12], S11, 0x6B901122); d = FF(d, a, b, c, x[k + 13], S12, 0xFD987193); c = FF(c, d, a, b, x[k + 14], S13, 0xA679438E); b = FF(b, c, d, a, x[k + 15], S14, 0x49B40821);
+            a = GG(a, b, c, d, x[k + 1], S21, 0xF61E2562); d = GG(d, a, b, c, x[k + 6], S22, 0xC040B340); c = GG(c, d, a, b, x[k + 11], S23, 0x265E5A51); b = GG(b, c, d, a, x[k], S24, 0xE9B6C7AA);
+            a = GG(a, b, c, d, x[k + 5], S21, 0xD62F105D); d = GG(d, a, b, c, x[k + 10], S22, 0x02441453); c = GG(c, d, a, b, x[k + 15], S23, 0xD8A1E681); b = GG(b, c, d, a, x[k + 4], S24, 0xE7D3FBC8);
+            a = GG(a, b, c, d, x[k + 9], S21, 0x21E1CDE6); d = GG(d, a, b, c, x[k + 14], S22, 0xC33707D6); c = GG(c, d, a, b, x[k + 3], S23, 0xF4D50D87); b = GG(b, c, d, a, x[k + 8], S24, 0x455A14ED);
+            a = GG(a, b, c, d, x[k + 13], S21, 0xA9E3E905); d = GG(d, a, b, c, x[k + 2], S22, 0xFCEFA3F8); c = GG(c, d, a, b, x[k + 7], S23, 0x676F02D9); b = GG(b, c, d, a, x[k + 12], S24, 0x8D2A4C8A);
+            a = HH(a, b, c, d, x[k + 5], S31, 0xFFFA3942); d = HH(d, a, b, c, x[k + 8], S32, 0x8771F681); c = HH(c, d, a, b, x[k + 11], S33, 0x6D9D6122); b = HH(b, c, d, a, x[k + 14], S34, 0xFDE5380C);
+            a = HH(a, b, c, d, x[k + 1], S31, 0xA4BEEA44); d = HH(d, a, b, c, x[k + 4], S32, 0x4BDECFA9); c = HH(c, d, a, b, x[k + 7], S33, 0xF6BB4B60); b = HH(b, c, d, a, x[k + 10], S34, 0xBEBFBC70);
+            a = HH(a, b, c, d, x[k + 13], S31, 0x289B7EC6); d = HH(d, a, b, c, x[k], S32, 0xEAA127FA); c = HH(c, d, a, b, x[k + 3], S33, 0xD4EF3085); b = HH(b, c, d, a, x[k + 6], S34, 0x04881D05);
+            a = HH(a, b, c, d, x[k + 9], S31, 0xD9D4D039); d = HH(d, a, b, c, x[k + 12], S32, 0xE6DB99E5); c = HH(c, d, a, b, x[k + 15], S33, 0x1FA27CF8); b = HH(b, c, d, a, x[k + 2], S34, 0xC4AC5665);
+            a = II(a, b, c, d, x[k], S41, 0xF4292244); d = II(d, a, b, c, x[k + 7], S42, 0x432AFF97); c = II(c, d, a, b, x[k + 14], S43, 0xAB9423A7); b = II(b, c, d, a, x[k + 5], S44, 0xFC93A039);
+            a = II(a, b, c, d, x[k + 12], S41, 0x655B59C3); d = II(d, a, b, c, x[k + 3], S42, 0x8F0CCC92); c = II(c, d, a, b, x[k + 10], S43, 0xFFEFF47D); b = II(b, c, d, a, x[k + 1], S44, 0x85845DD1);
+            a = II(a, b, c, d, x[k + 8], S41, 0x6FA87E4F); d = II(d, a, b, c, x[k + 15], S42, 0xFE2CE6E0); c = II(c, d, a, b, x[k + 6], S43, 0xA3014314); b = II(b, c, d, a, x[k + 13], S44, 0x4E0811A1);
+            a = II(a, b, c, d, x[k + 4], S41, 0xF7537E82); d = II(d, a, b, c, x[k + 11], S42, 0xBD3AF235); c = II(c, d, a, b, x[k + 2], S43, 0x2AD7D2BB); b = II(b, c, d, a, x[k + 9], S44, 0xEB86D391);
+            a = addUnsigned(a, AA); b = addUnsigned(b, BB); c = addUnsigned(c, CC); d = addUnsigned(d, DD);
+        }
+        return (wordToHex(a) + wordToHex(b) + wordToHex(c) + wordToHex(d)).toLowerCase();
+    };
+
+    window.devtoolsSha256 = async function(text) {
+        const msgBuffer = new TextEncoder().encode(text);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    };
+
+    function renderRequestTool() {
+        const container = document.getElementById('devtools-tools-content');
+        container.innerHTML = '<div class="devtools-request-header-row"><select class="devtools-request-method-select" id="devtools-request-method"><option value="GET">GET</option><option value="POST">POST</option><option value="PUT">PUT</option><option value="DELETE">DELETE</option><option value="PATCH">PATCH</option><option value="HEAD">HEAD</option></select><input type="text" class="devtools-input" id="devtools-request-url" placeholder="输入URL" style="flex:1;"></div><div class="devtools-input-group"><label class="devtools-input-label">请求头 (JSON格式)</label><textarea class="devtools-textarea" id="devtools-request-headers" placeholder=\'{"Content-Type": "application/json"}\'></textarea></div><div class="devtools-input-group"><label class="devtools-input-label">请求体</label><textarea class="devtools-textarea" id="devtools-request-body" placeholder="请求体内容..."></textarea></div><button class="devtools-tool-btn primary" onclick="window.devtoolsSendRequest()">发送请求</button><div id="devtools-request-response"></div>';
+    }
+
+    window.devtoolsSendRequest = async function() {
+        const method = document.getElementById('devtools-request-method').value;
+        const url = document.getElementById('devtools-request-url').value;
+        const headersText = document.getElementById('devtools-request-headers').value;
+        const body = document.getElementById('devtools-request-body').value;
+        const responseDiv = document.getElementById('devtools-request-response');
+
+        if (!url) {
+            responseDiv.innerHTML = '<div class="devtools-result-box error">请输入URL</div>';
+            return;
+        }
+
+        responseDiv.innerHTML = '<div class="devtools-result-box">正在发送请求...</div>';
+
+        let headers = {};
+        try {
+            if (headersText.trim()) {
+                headers = JSON.parse(headersText);
+            }
+        } catch (e) {
+            responseDiv.innerHTML = '<div class="devtools-result-box error">请求头格式错误: ' + escapeHtml(e.message) + '</div>';
+            return;
+        }
+
+        const options = { method, headers };
+        if (body && !['GET', 'HEAD'].includes(method)) {
+            options.body = body;
+        }
+
+        const startTime = Date.now();
+        try {
+            const response = await fetch(url, options);
+            const duration = Date.now() - startTime;
+            const responseText = await response.text();
+            let formattedText = responseText;
+            try {
+                const json = JSON.parse(responseText);
+                formattedText = JSON.stringify(json, null, 2);
+            } catch {}
+
+            responseDiv.innerHTML = '<div class="devtools-details-tabs"><div class="devtools-details-tab active" onclick="window.devtoolsSwitchReqRespTab(\'formatted\',this)">格式化</div><div class="devtools-details-tab" onclick="window.devtoolsSwitchReqRespTab(\'raw\',this)">原始</div></div><div id="devtools-reqresp-tab-formatted"><div style="margin-bottom:8px;padding:8px;background:#f5f5f5;border-radius:3px;font-size:11px;"><div><strong>状态:</strong> ' + response.status + ' ' + response.statusText + '</div><div><strong>耗时:</strong> ' + duration + 'ms</div><div><strong>大小:</strong> ' + responseText.length + ' 字节</div></div><pre class="devtools-raw-response" style="padding:8px;background:#f5f5f5;border:1px solid #eee;border-radius:3px;font-size:10px;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow:auto;">' + escapeHtml(formattedText) + '</pre></div><div id="devtools-reqresp-tab-raw" style="display:none;"><pre class="devtools-raw-response" style="padding:8px;background:#f5f5f5;border:1px solid #eee;border-radius:3px;font-size:10px;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow:auto;">' + escapeHtml(responseText) + '</pre></div>';
+        } catch (e) {
+            responseDiv.innerHTML = '<div class="devtools-result-box error">请求失败: ' + escapeHtml(e.message) + '</div>';
+        }
+    };
+
+    window.devtoolsSwitchReqRespTab = function(tab, el) {
+        el.parentElement.querySelectorAll('.devtools-details-tab').forEach(t => t.classList.remove('active'));
+        el.classList.add('active');
+        document.getElementById('devtools-reqresp-tab-formatted').style.display = tab === 'formatted' ? 'block' : 'none';
+        document.getElementById('devtools-reqresp-tab-raw').style.display = tab === 'raw' ? 'block' : 'none';
+    };
+
+    // ============ 资源面板 ============
+    function renderResourceContent() {
+        const container = document.getElementById('devtools-resource-content');
+        if (!container) return;
+        switch (activeResourceTab) {
+            case 'local': renderStorageTable(getLocalStorage(), '本地存储', 'local'); break;
+            case 'session': renderStorageTable(getSessionStorage(), '会话存储', 'session'); break;
+            case 'cookie': renderStorageTable(getCookies(), 'Cookie', 'cookie'); break;
+            case 'ua': renderUserAgent(); break;
+            case 'script': renderLinkList(getScripts(), '脚本'); break;
+            case 'stylesheet': renderLinkList(getStylesheets(), '样式表'); break;
+            case 'iframe': renderLinkList(getIframes(), '框架'); break;
+            case 'image': renderImageGrid(getImages(), '图片'); break;
+            case 'cache': renderCacheInfo(); break;
+            // 注意：如需“源码”标签可在资源标签处添加，此处暂不实现
+        }
+    }
+
+    function getLocalStorage() {
+        try {
+            const data = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key) {
+                    try { data.push({ key, value: localStorage.getItem(key), id: i }); } catch (e) {}
+                }
+            }
+            return data;
+        } catch (e) { return []; }
+    }
+
+    function getSessionStorage() {
+        try {
+            const data = [];
+            for (let i = 0; i < sessionStorage.length; i++) {
+                const key = sessionStorage.key(i);
+                if (key) {
+                    try { data.push({ key, value: sessionStorage.getItem(key), id: i }); } catch (e) {}
+                }
+            }
+            return data;
+        } catch (e) { return []; }
+    }
+
+    function getCookies() {
+        try {
+            if (!document.cookie) return [];
+            return document.cookie.split(';').map((cookie, idx) => {
+                const parts = cookie.trim().split('=');
+                const name = parts[0];
+                const value = parts.slice(1).join('=');
+                return { key: name, value, id: idx };
+            }).filter(item => item.key);
+        } catch (e) { return []; }
+    }
+
+    function getScripts() {
+        try {
+            return Array.from(document.scripts).map((s, i) => ({ url: s.src || '(内联脚本)', id: i }));
+        } catch (e) { return []; }
+    }
+
+    function getStylesheets() {
+        try {
+            const hrefs = [];
+            Array.from(document.styleSheets).forEach(sheet => { if (sheet.href) hrefs.push({ url: sheet.href, id: hrefs.length }); });
+            Array.from(document.getElementsByTagName('link')).forEach(link => {
+                if (link.rel === 'stylesheet' && link.href && !hrefs.find(h => h.url === link.href)) {
+                    hrefs.push({ url: link.href, id: hrefs.length });
+                }
+            });
+            return hrefs;
+        } catch (e) { return []; }
+    }
+
+    function getImages() {
+        try {
+            return Array.from(document.images).map((img, i) => ({ url: img.src, id: i }));
+        } catch (e) { return []; }
+    }
+
+    function getIframes() {
+        try {
+            return Array.from(document.getElementsByTagName('iframe')).map((iframe, i) => ({ url: iframe.src || '(空)', id: i }));
+        } catch (e) { return []; }
+    }
+
+    function renderStorageTable(data, title, type) {
+        const container = document.getElementById('devtools-resource-content');
+        let html = '<div class="devtools-resource-header"><span class="devtools-resource-title">' + title + '</span><span style="font-size:11px;color:#999;">共 ' + data.length + ' 个</span></div><table class="devtools-storage-table"><thead><tr><th style="width:30%;">键名</th><th style="width:50%;">值</th><th style="width:20%;">操作</th></tr></thead><tbody>';
+        data.forEach(item => {
+            const keyEscaped = escapeHtml(item.key).replace(/'/g, "\\'");
+            const valuePreview = item.value.length > 200 ? escapeHtml(item.value.substring(0, 200)) + '...' : escapeHtml(item.value);
+            html += '<tr><td>' + escapeHtml(item.key) + '</td><td>' + valuePreview + '</td><td><button class="devtools-action-btn" onclick="window.devtoolsEditStorage(\'' + keyEscaped + '\',\'' + type + '\')">编辑</button> <button class="devtools-action-btn" onclick="window.devtoolsCopyStorageValue(\'' + keyEscaped + '\',\'' + type + '\')">复制</button> <button class="devtools-action-btn" onclick="window.devtoolsDeleteStorage(\'' + keyEscaped + '\',\'' + type + '\')">删除</button></td></tr>';
+        });
+        html += '</tbody></table>';
+        if (['local', 'session'].includes(type)) {
+            html += '<button class="devtools-add-row" onclick="window.devtoolsAddStorage(\'' + type + '\')">+ 添加</button>';
+        }
+        container.innerHTML = html;
+    }
+
+    window.devtoolsEditStorage = function(key, type) {
+        let value = '';
+        if (type === 'local') value = localStorage.getItem(key) || '';
+        else if (type === 'session') value = sessionStorage.getItem(key) || '';
+        const newValue = prompt('编辑 "' + key + '" 的值:', value);
+        if (newValue !== null) {
+            if (type === 'local') localStorage.setItem(key, newValue);
+            else if (type === 'session') sessionStorage.setItem(key, newValue);
+            renderResourceContent();
+        }
+    };
+
+    window.devtoolsCopyStorageValue = function(key, type) {
+        let value = '';
+        if (type === 'local') value = localStorage.getItem(key) || '';
+        else if (type === 'session') value = sessionStorage.getItem(key) || '';
+        navigator.clipboard.writeText(value).then(() => alert('已复制')).catch(() => alert('复制失败'));
+    };
+
+    window.devtoolsDeleteStorage = function(key, type) {
+        if (confirm('确定删除 "' + key + '" 吗?')) {
+            if (type === 'local') localStorage.removeItem(key);
+            else if (type === 'session') sessionStorage.removeItem(key);
+            renderResourceContent();
+        }
+    };
+
+    window.devtoolsAddStorage = function(type) {
+        const key = prompt('请输入键名:');
+        if (!key) return;
+        const value = prompt('请输入值:', '');
+        if (value !== null) {
+            if (type === 'local') localStorage.setItem(key, value);
+            else if (type === 'session') sessionStorage.setItem(key, value);
+            renderResourceContent();
+        }
+    };
+
+    function renderLinkList(data, title) {
+        const container = document.getElementById('devtools-resource-content');
+        let html = '<div class="devtools-resource-header"><span class="devtools-resource-title">' + title + '</span><span style="font-size:11px;color:#999;">共 ' + data.length + ' 个</span></div><div class="devtools-resource-list">';
+        data.forEach(item => {
+            if (item.url.startsWith('http') || item.url.startsWith('//')) {
+                html += '<a href="' + escapeHtml(item.url) + '" target="_blank" class="devtools-resource-link">' + escapeHtml(item.url) + '</a>';
+            } else {
+                html += '<div class="devtools-resource-link" style="cursor:default;">' + escapeHtml(item.url) + '</div>';
+            }
+        });
+        html += '</div>';
+        container.innerHTML = html;
+    }
+
+    function renderImageGrid(data, title) {
+        const container = document.getElementById('devtools-resource-content');
+        const uniqueUrls = [...new Set(data.map(d => d.url))].slice(0, 100);
+        let html = '<div class="devtools-resource-header"><span class="devtools-resource-title">' + title + '</span><span style="font-size:11px;color:#999;">显示 ' + uniqueUrls.length + ' 张（共 ' + data.length + '）</span></div><div class="devtools-image-grid">';
+        uniqueUrls.forEach(url => {
+            html += '<div class="devtools-image-item"><img src="' + escapeHtml(url) + '" loading="lazy" alt="" onerror="this.style.display=\'none\';this.parentElement.innerHTML=\'<div style=&quot;padding:10px;text-align:center;color:#999;font-size:10px;&quot;>加载失败</div>\'"></div>';
+        });
+        html += '</div>';
+        container.innerHTML = html;
+    }
+
+    function renderUserAgent() {
+        const container = document.getElementById('devtools-resource-content');
+        const ua = navigator.userAgent || '未知';
+        window.__uaString = ua;
+        container.innerHTML = '<div class="devtools-resource-header"><span class="devtools-resource-title">User Agent</span></div><div style="padding:8px;font-size:11px;"><div style="margin-bottom:10px;padding:10px;background:#f5f5f5;border-radius:4px;word-break:break-all;font-family:Consolas,Monaco,monospace;font-size:10px;">' + escapeHtml(ua) + '</div><button class="devtools-action-btn" onclick="window.devtoolsCopyUA()">复制</button></div>';
+    }
+
+    window.devtoolsCopyUA = function() {
+        if (window.__uaString) {
+            navigator.clipboard.writeText(window.__uaString).then(() => alert('已复制')).catch(() => alert('复制失败'));
+        }
+    };
+
+    function renderCacheInfo() {
+        const container = document.getElementById('devtools-resource-content');
+        const usedMemory = performance.memory?.usedJSHeapSize ? (performance.memory.usedJSHeapSize / 1024 / 1024).toFixed(2) + 'MB' : '不支持';
+        const totalMemory = performance.memory?.jsHeapSizeLimit ? (performance.memory.jsHeapSizeLimit / 1024 / 1024).toFixed(2) + 'MB' : '不支持';
+        const domCount = document.querySelectorAll('*').length;
+        container.innerHTML = '<div class="devtools-resource-header"><span class="devtools-resource-title">缓存信息</span></div><div style="padding:8px;font-size:11px;"><div class="devtools-performance-metric"><span class="devtools-performance-label">内存使用</span><span class="devtools-performance-value">' + usedMemory + '</span></div><div class="devtools-performance-metric"><span class="devtools-performance-label">总内存</span><span class="devtools-performance-value">' + totalMemory + '</span></div><div class="devtools-performance-metric"><span class="devtools-performance-label">DOM节点数</span><span class="devtools-performance-value">' + domCount + '</span></div><button class="devtools-tool-btn" onclick="location.reload()" style="margin-top:10px;">刷新页面</button></div>';
+    }
+
+    // ============ 性能面板 ============
+    function renderPerformanceContent() {
+        try {
+            const container = document.getElementById('devtools-performance-content');
+            if (!container) return;
+            const nt = performance.timing || {};
+            const navEntry = performance.getEntriesByType('navigation')[0] || {};
+            let html = '';
+
+            const loadTime = navEntry.loadEventEnd ? Math.round(navEntry.loadEventEnd) : (nt.loadEventEnd - nt.navigationStart > 0 ? (nt.loadEventEnd - nt.navigationStart) + 'ms' : '计算中');
+            const domParseTime = navEntry.domContentLoadedEventEnd ? Math.round(navEntry.domContentLoadedEventEnd) : (nt.domContentLoadedEventEnd - nt.domLoading > 0 ? (nt.domContentLoadedEventEnd - nt.domLoading) + 'ms' : '计算中');
+            const firstByteTime = navEntry.responseStart ? Math.round(navEntry.responseStart) : (nt.responseStart - nt.navigationStart > 0 ? (nt.responseStart - nt.navigationStart) + 'ms' : '计算中');
+            const resourceTime = (nt.loadEventEnd && nt.domContentLoadedEventEnd) ? (nt.loadEventEnd - nt.domContentLoadedEventEnd) + 'ms' : '计算中';
+
+            html += '<div class="devtools-performance-metric"><span class="devtools-performance-label">页面加载时间</span><span class="devtools-performance-value">' + loadTime + '</span></div>';
+            html += '<div class="devtools-performance-metric"><span class="devtools-performance-label">DOM解析时间</span><span class="devtools-performance-value">' + domParseTime + '</span></div>';
+            html += '<div class="devtools-performance-metric"><span class="devtools-performance-label">白屏时间</span><span class="devtools-performance-value">' + firstByteTime + '</span></div>';
+            html += '<div class="devtools-performance-metric"><span class="devtools-performance-label">资源加载时间</span><span class="devtools-performance-value">' + resourceTime + '</span></div>';
+            html += '<div class="devtools-performance-metric"><span class="devtools-performance-label">DOM节点数</span><span class="devtools-performance-value">' + document.querySelectorAll('*').length + '</span></div>';
+            html += '<div class="devtools-performance-metric"><span class="devtools-performance-label">图片数量</span><span class="devtools-performance-value">' + document.images.length + '</span></div>';
+            html += '<div class="devtools-performance-metric"><span class="devtools-performance-label">脚本数量</span><span class="devtools-performance-value">' + document.scripts.length + '</span></div>';
+
+            if (performance.memory) {
+                html += '<div class="devtools-performance-metric"><span class="devtools-performance-label">已用内存</span><span class="devtools-performance-value">' + (performance.memory.usedJSHeapSize / 1024 / 1024).toFixed(2) + 'MB</span></div>';
+                html += '<div class="devtools-performance-metric"><span class="devtools-performance-label">总内存</span><span class="devtools-performance-value">' + (performance.memory.jsHeapSizeLimit / 1024 / 1024).toFixed(2) + 'MB</span></div>';
+            }
+
+            container.innerHTML = html;
+        } catch (e) {
+            console.error('性能面板渲染出错:', e);
+        }
+    }
+
+    // ============ 初始化 ============
+    function addKeyboardShortcut() {
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'I') {
+                e.preventDefault();
+                toggleSidebar();
+            }
+        });
+    }
+
+    function init() {
+        try {
+            console.log('DevScope v5.4.1 开始初始化');
+            createStyles();
+            createSidebar();
+            hijackConsole();
+            hijackNetwork();
+            addKeyboardShortcut();
+            console.log('DevScope 已加载，欢迎使用xu369服务');
+        } catch (error) {
+            console.error('DevScope 初始化失败:', error);
+        }
+    }
+
+    if (document.body) {
+        requestIdleCallback ? requestIdleCallback(init) : setTimeout(init, 100);
+    } else {
+        document.addEventListener('DOMContentLoaded', () => requestIdleCallback ? requestIdleCallback(init) : init);
+    }
+})();
