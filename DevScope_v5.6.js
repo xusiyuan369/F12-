@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         DevScope 开发者工具 v5.6
+// @name         DevScope 开发者工具 v5.8
 // @namespace    devtools-sidebar-native
-// @version      5.6
+// @version      5.8
 // @description  完整独立调试工具 
 // @author       Developer
 // @run-at       document-end
@@ -19,7 +19,6 @@
         sun: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>',
         moon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>',
         settings: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>',
-
     };
 
     // ============ 全局变量 ============
@@ -28,7 +27,6 @@
     let activeToolTab = 'regex';
     let activeResourceTab = 'local';
     let isDarkTheme = false;
-    // 移动端检测与默认设置
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     let visualWidth = parseInt(localStorage.getItem('devtools-visual-width')) || (isMobile ? 320 : 420);
     let sidebarMode = localStorage.getItem('devtools-sidebar-mode') || (isMobile ? 'overlay' : 'push');
@@ -80,7 +78,6 @@
         const style = document.createElement('style');
         style.id = 'devtools-native-styles';
         style.textContent = `
-            /* 开关按钮 – 窄版黑白 – 最高层级 */
             .devtools-toggle-btn {
                 position: fixed; top: 50%; right: 0; transform: translateY(-50%);
                 z-index: 2147483647 !important; background: #333; color: #fff; border: none;
@@ -89,7 +86,6 @@
                 transition: right 0.3s, background 0.2s; pointer-events: auto;
             }
             .devtools-toggle-btn:hover { background: #555; }
-
             .devtools-sidebar {
                 position: fixed; top: 0; height: 100vh; background: var(--bg-sidebar, #fff);
                 z-index: 2147483646 !important; transition: right 0.3s; display: flex; flex-direction: column;
@@ -184,40 +180,29 @@
             }
             .devtools-tree-node { padding: 2px 4px; cursor: pointer; user-select: none; }
             .devtools-tree-node:hover { background: rgba(0, 120, 212, 0.08); }
-            .devtools-tree-node.selected { background: rgba(0, 120, 212, 0.15); color: inherit; } /* Edge选中淡蓝背景 */
+            .devtools-tree-node.selected { background: rgba(0, 120, 212, 0.15); color: inherit; }
             .devtools-tree-toggle { display: inline-block; width: 16px; text-align: center; color: var(--text-secondary, #666); }
             .devtools-tree-children { margin-left: 16px; display: none; }
             .devtools-tree-children.open { display: block; }
-            /* Edge DevTools 风格语法高亮 - 淡雅配色 */
-            .devtools-tag-name { color: #569cd6; } /* 标签名 - 淡蓝色 */
-            .devtools-attr-name { color: #9cdcfe; } /* 属性名 - 浅蓝色 */
-            .devtools-attr-value { color: #ce9178; } /* 属性值 - 淡橙色 */
-            .devtools-comment { color: #6a9955; } /* 注释 - 淡绿色 */
-            .devtools-string { color: #ce9178; } /* 字符串 - 淡橙色 */
-            .devtools-number { color: #b5cea8; } /* 数字 - 淡青绿 */
-            .devtools-keyword { color: #569cd6; } /* 关键字 - 淡蓝色 */
-            .devtools-function { color: #dcdcaa; } /* 函数名 - 淡黄色 */
+            .devtools-tag-name { color: #569cd6; }
+            .devtools-attr-name { color: #9cdcfe; }
+            .devtools-attr-value { color: #ce9178; }
             .devtools-element-inspector {
                 width: 220px; border-left: 1px solid var(--border-light, #eee);
                 padding: 8px; overflow-y: auto; display: none;
             }
             .devtools-element-inspector.visible { display: block; }
-            .devtools-inspector-title { font-weight: 600; margin-bottom: 8px; font-size: 12px; }
+            .devtools-inspector-title { font-weight: 600; margin-bottom: 8px; font-size: 12px; display: flex; justify-content: space-between; align-items: center; }
+            .devtools-inspector-close { cursor: pointer; color: var(--text-secondary, #666); font-size: 18px; line-height: 1; padding: 0 4px; }
             .devtools-inspector-section { margin-bottom: 12px; }
             .devtools-inspector-prop { display: flex; margin-bottom: 4px; }
             .devtools-inspector-key { color: var(--text-attr, #666); min-width: 80px; }
             .devtools-inspector-val { word-break: break-all; }
-            /* Edge DevTools 风格高亮框 - 极淡半透明背景 */
             .devtools-highlight-overlay {
                 position: fixed; z-index: 2147483644 !important; pointer-events: none;
                 background: rgba(0, 120, 212, 0.08); border: 1px solid rgba(0, 120, 212, 0.5);
                 box-sizing: border-box;
             }
-            /* Edge DevTools 风格布局信息展示 - 淡雅半透明 */
-            .devtools-highlight-margin { position: absolute; background: rgba(255, 200, 150, 0.25); } /* 淡橙色 - margin */
-            .devtools-highlight-border { position: absolute; background: rgba(255, 230, 150, 0.35); } /* 淡黄色 - border */
-            .devtools-highlight-padding { position: absolute; background: rgba(150, 220, 150, 0.25); } /* 淡绿色 - padding */
-            .devtools-highlight-content { position: absolute; background: rgba(150, 200, 255, 0.2); } /* 淡蓝色 - content */
 
             /* 网络 */
             .devtools-network-wrapper { flex: 1; display: flex; flex-direction: column; padding: 8px; overflow: hidden; }
@@ -325,7 +310,7 @@
             .devtools-selector-result:hover { background: var(--bg-hover, #f5f5f5); }
             .devtools-selector-result.selected { background: var(--bg-selected, #000); color: #fff; }
 
-            /* 上下文菜单 – 最高层级 */
+            /* 上下文菜单 */
             .devtools-context-menu {
                 position: fixed; z-index: 2147483648 !important; background: var(--bg-panel, #fff);
                 border: 1px solid var(--border, #ccc); border-radius: 4px;
@@ -389,13 +374,6 @@
                 --text-link: #3794ff; --text-warn: #dcdcaa; --text-error: #f44747; --text-info: #4ec9b0;
                 --border: #454545; --border-light: #3c3c3c; --border-active: #0078d4;
             }
-            /* 暗色主题下的语法高亮 */
-            .devtools-sidebar.dark-theme .devtools-tag-name { color: #569cd6; }
-            .devtools-sidebar.dark-theme .devtools-attr-name { color: #9cdcfe; }
-            .devtools-sidebar.dark-theme .devtools-attr-value { color: #ce9178; }
-            .devtools-sidebar.dark-theme .devtools-comment { color: #6a9955; }
-            .devtools-sidebar.dark-theme .devtools-string { color: #ce9178; }
-            .devtools-sidebar.dark-theme .devtools-number { color: #b5cea8; }
         `;
         document.head.appendChild(style);
     }
@@ -471,19 +449,13 @@
         // 标签栏
         const tabsContainer = document.createElement('div');
         tabsContainer.className = 'devtools-tabs';
-        [
-            { id: 'console', label: '控制台' },
-            { id: 'elements', label: '元素' },
-            { id: 'network', label: '网络' },
-            { id: 'tools', label: '工具' },
-            { id: 'resources', label: '资源' },
-            { id: 'performance', label: '性能' }
-        ].forEach(tab => {
+        ['控制台', '元素', '网络', '工具', '资源', '性能'].forEach((label, i) => {
+            const ids = ['console', 'elements', 'network', 'tools', 'resources', 'performance'];
             const btn = document.createElement('div');
-            btn.className = 'devtools-tab' + (tab.id === 'console' ? ' active' : '');
-            btn.dataset.tab = tab.id;
-            btn.innerHTML = tab.label;
-            btn.addEventListener('click', () => switchTab(tab.id));
+            btn.className = 'devtools-tab' + (i === 0 ? ' active' : '');
+            btn.dataset.tab = ids[i];
+            btn.innerHTML = label;
+            btn.addEventListener('click', () => switchTab(ids[i]));
             tabsContainer.appendChild(btn);
         });
         sidebar.appendChild(tabsContainer);
@@ -524,12 +496,15 @@
                 <div class="devtools-elements-header">
                     <button class="devtools-element-selector" id="devtools-element-selector-btn">选择元素</button>
                     <button class="devtools-console-btn" id="devtools-elements-refresh">刷新树</button>
-                    <button class="devtools-console-btn" id="devtools-view-source-btn" title="查看带语法高亮的页面源码">查看源码</button>
+                    <button class="devtools-console-btn" id="devtools-copy-page-source-btn">复制源码</button>
                 </div>
                 <div class="devtools-element-container">
                     <div class="devtools-element-tree" id="devtools-element-tree"></div>
                     <div class="devtools-element-inspector" id="devtools-element-inspector">
-                        <div class="devtools-inspector-title">元素信息</div>
+                        <div class="devtools-inspector-title">
+                            <span>元素信息</span>
+                            <span class="devtools-inspector-close" id="devtools-inspector-close">×</span>
+                        </div>
                         <div id="devtools-inspector-content">
                             <div style="color:#999;">点击元素并选择"查看元素信息"</div>
                         </div>
@@ -539,7 +514,7 @@
         `;
         content.appendChild(elementsPanel);
 
-        // 网络面板 - 增强版（过滤+搜索）
+        // 网络面板
         const networkPanel = document.createElement('div');
         networkPanel.className = 'devtools-panel';
         networkPanel.id = 'devtools-panel-network';
@@ -606,7 +581,7 @@
         `;
         content.appendChild(resourcesPanel);
 
-        // 性能面板 - 简化版
+        // 性能面板
         const performancePanel = document.createElement('div');
         performancePanel.className = 'devtools-panel';
         performancePanel.id = 'devtools-panel-performance';
@@ -648,6 +623,11 @@
         `;
         document.body.appendChild(contextMenu);
 
+        // 元素信息关闭按钮
+        document.getElementById('devtools-inspector-close').addEventListener('click', () => {
+            document.getElementById('devtools-element-inspector').classList.remove('visible');
+        });
+
         initEventListeners();
         initTreeEventDelegation();
         initContextMenuEvents();
@@ -688,7 +668,6 @@
             autoShowInspector = e.target.checked;
             localStorage.setItem('devtools-auto-inspector', autoShowInspector);
         });
-        // 重置设置
         document.getElementById('devtools-reset-settings').addEventListener('click', () => {
             if (confirm('确定要重置所有设置吗？')) {
                 ['devtools-sidebar-mode','devtools-visual-width','devtools-sidebar-zoom','devtools-sidebar-opacity','devtools-auto-inspector'].forEach(key => localStorage.removeItem(key));
@@ -709,8 +688,7 @@
             renderLogs();
         });
         document.getElementById('devtools-console-clear').addEventListener('click', clearConsole);
-        
-        // 控制台输入 - 支持命令历史
+
         const consoleInput = document.getElementById('devtools-console-input');
         consoleInput.addEventListener('keydown', e => {
             if (e.key === 'Enter') {
@@ -736,7 +714,7 @@
                 }
             }
         });
-        
+
         document.querySelectorAll('[data-filter]').forEach(btn => {
             btn.addEventListener('click', () => {
                 if (btn.dataset.filter === 'all') {
@@ -757,20 +735,21 @@
             elementTreeRendered = false;
             renderElementTree();
         });
-        document.getElementById('devtools-view-source-btn').addEventListener('click', () => window.devtoolsViewSource());
+        document.getElementById('devtools-copy-page-source-btn').addEventListener('click', () => {
+            copyToClipboard(document.documentElement.outerHTML);
+        });
         document.getElementById('devtools-network-clear').addEventListener('click', clearNetwork);
-        
+
         let isNetworkPaused = false;
         document.getElementById('devtools-network-pause').addEventListener('click', function() {
             isNetworkPaused = !isNetworkPaused;
             this.textContent = isNetworkPaused ? '继续' : '暂停';
             window.__networkPaused = isNetworkPaused;
         });
-        
-        // 网络面板过滤和搜索
+
         document.getElementById('devtools-network-type-filter').addEventListener('change', renderNetworkRequests);
         document.getElementById('devtools-network-search').addEventListener('input', renderNetworkRequests);
-        
+
         document.querySelectorAll('.devtools-tools-tab').forEach(tab => {
             tab.addEventListener('click', () => {
                 document.querySelectorAll('.devtools-tools-tab').forEach(t => t.classList.remove('active'));
@@ -789,7 +768,7 @@
         });
     }
 
-    // 元素树事件委托
+    // ============ 元素树事件 ============
     function initTreeEventDelegation() {
         const tree = document.getElementById('devtools-element-tree');
         if (!tree) return;
@@ -805,7 +784,12 @@
             if (element) {
                 highlightElement(element);
                 selectTreeNode(node);
-                if (autoShowInspector) renderElementInspector(element);
+                const inspPanel = document.getElementById('devtools-element-inspector');
+                if (inspPanel && inspPanel.classList.contains('visible')) {
+                    renderElementInspector(element);
+                } else if (autoShowInspector) {
+                    renderElementInspector(element);
+                }
             }
 
             const toggle = node.querySelector('.devtools-tree-toggle');
@@ -859,6 +843,105 @@
         tree.addEventListener('touchmove', () => clearTimeout(longPressTimer), { passive: true });
     }
 
+    // ============ 上下文菜单 ============
+    function initContextMenuEvents() {
+        const menu = document.getElementById('devtools-context-menu');
+        const backdrop = document.getElementById('devtools-context-backdrop');
+
+        menu?.addEventListener('click', e => {
+            const item = e.target.closest('.devtools-context-menu-item');
+            if (!item) return;
+            const action = item.dataset.action;
+            const el = window.__contextElement;
+            if (action === 'inspectElement' && el) {
+                renderElementInspector(el);
+            } else if (action && el) {
+                performCopyAction(action, el);
+            }
+            hideContextMenu();
+        });
+
+        // 全局点击关闭
+        document.addEventListener('click', e => {
+            if (menu && menu.classList.contains('show')) {
+                if (!menu.contains(e.target)) {
+                    hideContextMenu();
+                }
+            }
+        });
+
+        // 防止菜单内点击冒泡
+        menu?.addEventListener('click', e => e.stopPropagation());
+    }
+
+    function showContextMenu(x, y, element) {
+        window.__contextElement = element;
+        const menu = document.getElementById('devtools-context-menu');
+        const backdrop = document.getElementById('devtools-context-backdrop');
+        if (!menu || !backdrop) return;
+        menu.classList.add('show');
+        backdrop.classList.add('show');
+        const menuW = menu.offsetWidth;
+        const menuH = menu.offsetHeight;
+        let posX = x, posY = y;
+        if (x + menuW > window.innerWidth) posX = window.innerWidth - menuW - 4;
+        if (y + menuH > window.innerHeight) posY = window.innerHeight - menuH - 4;
+        posX = Math.max(4, posX);
+        posY = Math.max(4, posY);
+        menu.style.left = posX + 'px';
+        menu.style.top = posY + 'px';
+    }
+
+    function hideContextMenu() {
+        document.getElementById('devtools-context-menu')?.classList.remove('show');
+        document.getElementById('devtools-context-backdrop')?.classList.remove('show');
+        window.__contextElement = null;
+    }
+
+    function performCopyAction(action, element) {
+        let text = '';
+        try {
+            switch (action) {
+                case 'copyElement': case 'copyOuterHTML': text = element.outerHTML; break;
+                case 'copySelector': text = getUniqueSelector(element); break;
+                case 'copyJSPath': text = getJSPath(element); break;
+                case 'copyStyles': text = getComputedStyles(element); break;
+                case 'copyXPath': text = getXPath(element, false); break;
+                case 'copyFullXPath': text = getXPath(element, true); break;
+            }
+        } catch (e) { text = '获取失败: ' + e.message; }
+        if (text) copyToClipboard(text);
+    }
+
+    function copyToClipboard(text) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(() => showToast('已复制')).catch(() => fallbackCopy(text));
+        } else fallbackCopy(text);
+    }
+
+    function fallbackCopy(text) {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;';
+        document.body.appendChild(textarea);
+        textarea.select();
+        textarea.setSelectionRange(0, textarea.value.length);
+        try { document.execCommand('copy'); showToast('已复制'); } catch (e) { showToast('复制失败'); }
+        document.body.removeChild(textarea);
+    }
+
+    function showToast(msg) {
+        const existing = document.getElementById('devtools-toast');
+        if (existing) existing.remove();
+        const toast = document.createElement('div');
+        toast.id = 'devtools-toast';
+        toast.textContent = msg;
+        toast.style.cssText = 'position:fixed;bottom:60px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.8);color:#fff;padding:8px 20px;border-radius:20px;font-size:12px;z-index:2147483648;pointer-events:none;transition:opacity 0.3s;font-family:sans-serif;';
+        document.body.appendChild(toast);
+        setTimeout(() => { toast.style.opacity = '0'; }, 1200);
+        setTimeout(() => { toast.remove(); }, 1500);
+    }
+
     // ============ 侧边栏控制 ============
     function applySidebarSettings() {
         const sidebar = document.getElementById('devtools-sidebar');
@@ -868,8 +951,7 @@
             sidebar.style.setProperty('width', actualWidth + 'px', 'important');
             sidebar.style.setProperty('zoom', sidebarZoom, 'important');
             sidebar.style.setProperty('opacity', sidebarOpacity, 'important');
-            if (isOpen) sidebar.style.setProperty('right', '0px', 'important');
-            else sidebar.style.setProperty('right', '-' + actualWidth + 'px', 'important');
+            sidebar.style.setProperty('right', isOpen ? '0px' : '-' + actualWidth + 'px', 'important');
         }
         if (toggleBtn) {
             toggleBtn.style.setProperty('right', isOpen ? visualWidth + 'px' : '0px', 'important');
@@ -931,8 +1013,6 @@
         if (tabId === 'resources') renderResourceContent();
         if (tabId === 'performance') renderPerformanceContent();
     }
-
-
 
     function adjustZoom(delta) {
         const slider = document.getElementById('devtools-setting-zoom');
@@ -1112,7 +1192,6 @@
         };
     }
 
-    // 网络请求渲染 - 增强版（过滤+搜索）
     function renderNetworkRequests() {
         const container = document.getElementById('devtools-network-list');
         if (!container) return;
@@ -1120,7 +1199,6 @@
         const searchText = (document.getElementById('devtools-network-search')?.value || '').toLowerCase();
 
         const filtered = networkRequests.filter(req => {
-            // 类型过滤
             if (typeFilter !== 'all') {
                 const ext = req.url.split('.').pop().split('?')[0].toLowerCase();
                 if (typeFilter === 'JS' && !['js', 'mjs'].includes(ext) && !req.url.includes('/js/')) return false;
@@ -1129,7 +1207,6 @@
                 if (typeFilter === 'XHR' && (req.url.includes('.js') || req.url.includes('.css') || req.url.includes('.png'))) return false;
                 if (typeFilter === 'Other' && ['js','css','png','jpg','jpeg','gif','svg','webp','ico','mjs'].includes(ext)) return false;
             }
-            // 搜索过滤
             if (searchText && !req.url.toLowerCase().includes(searchText)) return false;
             return true;
         });
@@ -1252,72 +1329,11 @@
         const overlay = document.getElementById('devtools-highlight-overlay');
         if (!element || !overlay) return;
         const rect = element.getBoundingClientRect();
-        const computed = window.getComputedStyle(element);
-        
-        // 获取布局数值
-        const marginTop = parseFloat(computed.marginTop) || 0;
-        const marginRight = parseFloat(computed.marginRight) || 0;
-        const marginBottom = parseFloat(computed.marginBottom) || 0;
-        const marginLeft = parseFloat(computed.marginLeft) || 0;
-        const borderTop = parseFloat(computed.borderTopWidth) || 0;
-        const borderRight = parseFloat(computed.borderRightWidth) || 0;
-        const borderBottom = parseFloat(computed.borderBottomWidth) || 0;
-        const borderLeft = parseFloat(computed.borderLeftWidth) || 0;
-        const paddingTop = parseFloat(computed.paddingTop) || 0;
-        const paddingRight = parseFloat(computed.paddingRight) || 0;
-        const paddingBottom = parseFloat(computed.paddingBottom) || 0;
-        const paddingLeft = parseFloat(computed.paddingLeft) || 0;
-        
-        // 设置主高亮框位置（包含margin区域）
         overlay.style.display = 'block';
-        overlay.style.top = (rect.top - marginTop) + 'px';
-        overlay.style.left = (rect.left - marginLeft) + 'px';
-        overlay.style.width = (rect.width + marginLeft + marginRight) + 'px';
-        overlay.style.height = (rect.height + marginTop + marginBottom) + 'px';
-        
-        // 清除旧的布局层
-        overlay.innerHTML = '';
-        
-        // Edge风格嵌套矩形盒模型展示
-        // 第1层: margin（橙色）- 整个overlay背景即为margin区域
-        // 第2层: border（黄色）- 完整矩形
-        if (borderTop > 0 || borderRight > 0 || borderBottom > 0 || borderLeft > 0) {
-            const borderDiv = document.createElement('div');
-            borderDiv.className = 'devtools-highlight-border';
-            borderDiv.style.position = 'absolute';
-            borderDiv.style.top = marginTop + 'px';
-            borderDiv.style.left = marginLeft + 'px';
-            borderDiv.style.width = Math.max(0, rect.width) + 'px';
-            borderDiv.style.height = Math.max(0, rect.height) + 'px';
-            overlay.appendChild(borderDiv);
-        }
-        
-        // 第3层: padding（绿色）- 完整矩形
-        if (paddingTop > 0 || paddingRight > 0 || paddingBottom > 0 || paddingLeft > 0) {
-            const paddingDiv = document.createElement('div');
-            paddingDiv.className = 'devtools-highlight-padding';
-            paddingDiv.style.position = 'absolute';
-            paddingDiv.style.top = (marginTop + borderTop) + 'px';
-            paddingDiv.style.left = (marginLeft + borderLeft) + 'px';
-            paddingDiv.style.width = Math.max(0, rect.width - borderLeft - borderRight) + 'px';
-            paddingDiv.style.height = Math.max(0, rect.height - borderTop - borderBottom) + 'px';
-            overlay.appendChild(paddingDiv);
-        }
-        
-        // 第4层: content（蓝色）- 完整矩形
-        const contentW = Math.max(0, rect.width - borderLeft - borderRight - paddingLeft - paddingRight);
-        const contentH = Math.max(0, rect.height - borderTop - borderBottom - paddingTop - paddingBottom);
-        if (contentW > 0 && contentH > 0) {
-            const contentDiv = document.createElement('div');
-            contentDiv.className = 'devtools-highlight-content';
-            contentDiv.style.position = 'absolute';
-            contentDiv.style.top = (marginTop + borderTop + paddingTop) + 'px';
-            contentDiv.style.left = (marginLeft + borderLeft + paddingLeft) + 'px';
-            contentDiv.style.width = contentW + 'px';
-            contentDiv.style.height = contentH + 'px';
-            overlay.appendChild(contentDiv);
-        }
-        
+        overlay.style.top = rect.top + 'px';
+        overlay.style.left = rect.left + 'px';
+        overlay.style.width = rect.width + 'px';
+        overlay.style.height = rect.height + 'px';
         selectedElement = element;
     }
 
@@ -1351,68 +1367,6 @@
             html += '</div>';
         }
         container.innerHTML = html;
-    }
-
-    // Edge风格HTML语法高亮
-    function highlightHTML(html) {
-        return escapeHtml(html)
-            // 标签名 <tag
-            .replace(/&lt;(\/?)([a-zA-Z0-9-]+)/g, '&lt;$1<span class="devtools-tag-name">$2</span>')
-            // 属性名
-            .replace(/\s([a-zA-Z-:]+)=/g, ' <span class="devtools-attr-name">$1</span>=')
-            // 属性值（双引号）
-            .replace(/="([^"]*)"/g, '="<span class="devtools-attr-value">$1</span>"')
-            // 属性值（单引号）
-            .replace(/='([^']*)'/g, '=\'<span class="devtools-attr-value">$1</span>\'')
-            // 注释
-            .replace(/(&lt;!--[\s\S]*?--&gt;)/g, '<span class="devtools-comment">$1</span>')
-            // DOCTYPE
-            .replace(/(&lt;!DOCTYPE[^&]*&gt;)/gi, '<span class="devtools-comment">$1</span>');
-    }
-
-    // 查看带语法高亮的源码
-    window.devtoolsViewSource = function() {
-        const source = document.documentElement.outerHTML;
-        const formatted = formatHTML(source);
-        const highlighted = highlightHTML(formatted);
-        
-        const modal = document.createElement('div');
-        modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:2147483649;display:flex;align-items:center;justify-content:center;';
-        modal.className = 'devtools-view-source-modal';
-        modal.innerHTML = `
-            <div style="background:var(--bg-panel,#fff);width:90%;height:90%;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.3);display:flex;flex-direction:column;overflow:hidden;">
-                <div style="padding:12px 16px;background:var(--bg-header,#f5f5f5);border-bottom:1px solid var(--border,#ccc);display:flex;justify-content:space-between;align-items:center;">
-                    <span style="font-weight:600;font-size:14px;">页面源码 (Edge风格)</span>
-                    <button id="devtools-source-close-x" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-secondary,#666);">×</button>
-                </div>
-                <div style="flex:1;overflow:auto;padding:16px;font-family:Consolas,monospace;font-size:12px;line-height:1.6;white-space:pre;">${highlighted}</div>
-                <div style="padding:12px 16px;background:var(--bg-header,#f5f5f5);border-top:1px solid var(--border,#ccc);display:flex;gap:8px;justify-content:flex-end;">
-                    <button id="devtools-source-copy" class="devtools-console-btn">复制源码</button>
-                    <button id="devtools-source-close" class="devtools-console-btn">关闭</button>
-                </div>
-            </div>
-        `;
-        document.body.appendChild(modal);
-        
-        // 绑定事件
-        document.getElementById('devtools-source-close-x').addEventListener('click', () => modal.remove());
-        document.getElementById('devtools-source-close').addEventListener('click', () => modal.remove());
-        document.getElementById('devtools-source-copy').addEventListener('click', () => {
-            navigator.clipboard.writeText(document.documentElement.outerHTML).then(() => showToast('已复制'));
-        });
-    };
-
-    // 简单的HTML格式化
-    function formatHTML(html) {
-        let formatted = '';
-        let indent = 0;
-        const tab = '  ';
-        html.split(/(>)(<)(\/)/g).forEach(function(node) {
-            if (node.match(/^\/\w/)) indent--;
-            formatted += new Array(indent + 1).join(tab) + node;
-            if (node.match(/^<?\w[^>]*[^\/]$/)) indent++;
-        });
-        return formatted;
     }
 
     function toggleElementSelection() {
@@ -1520,92 +1474,6 @@
         return elementIdToElementMap.get(id) || null;
     }
 
-    // ============ 上下文菜单 ============
-    function showContextMenu(x, y, element) {
-        window.__contextElement = element;
-        const menu = document.getElementById('devtools-context-menu');
-        const backdrop = document.getElementById('devtools-context-backdrop');
-        if (!menu || !backdrop) return;
-        menu.classList.add('show');
-        backdrop.classList.add('show');
-        const menuW = menu.offsetWidth;
-        const menuH = menu.offsetHeight;
-        let posX = x, posY = y;
-        if (x + menuW > window.innerWidth) posX = window.innerWidth - menuW - 4;
-        if (y + menuH > window.innerHeight) posY = window.innerHeight - menuH - 4;
-        posX = Math.max(4, posX);
-        posY = Math.max(4, posY);
-        menu.style.left = posX + 'px';
-        menu.style.top = posY + 'px';
-    }
-
-    function hideContextMenu() {
-        document.getElementById('devtools-context-menu')?.classList.remove('show');
-        document.getElementById('devtools-context-backdrop')?.classList.remove('show');
-        window.__contextElement = null;
-    }
-
-    function initContextMenuEvents() {
-        document.getElementById('devtools-context-backdrop')?.addEventListener('click', hideContextMenu);
-        document.getElementById('devtools-context-backdrop')?.addEventListener('touchstart', hideContextMenu, { passive: true });
-        document.getElementById('devtools-context-menu')?.addEventListener('click', e => {
-            const item = e.target.closest('.devtools-context-menu-item');
-            if (!item) return;
-            const action = item.dataset.action;
-            const el = window.__contextElement;
-            if (action === 'inspectElement' && el) {
-                renderElementInspector(el);
-            } else if (action && el) {
-                performCopyAction(action, el);
-            }
-            hideContextMenu();
-        });
-    }
-
-    function performCopyAction(action, element) {
-        let text = '';
-        try {
-            switch (action) {
-                case 'copyElement': case 'copyOuterHTML': text = element.outerHTML; break;
-                case 'copySelector': text = getUniqueSelector(element); break;
-                case 'copyJSPath': text = getJSPath(element); break;
-                case 'copyStyles': text = getComputedStyles(element); break;
-                case 'copyXPath': text = getXPath(element, false); break;
-                case 'copyFullXPath': text = getXPath(element, true); break;
-            }
-        } catch (e) { text = '获取失败: ' + e.message; }
-        if (text) copyToClipboard(text);
-    }
-
-    function copyToClipboard(text) {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(text).then(() => showToast('已复制')).catch(() => fallbackCopy(text));
-        } else fallbackCopy(text);
-    }
-
-    function fallbackCopy(text) {
-        const textarea = document.createElement('textarea');
-        textarea.value = text;
-        textarea.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;';
-        document.body.appendChild(textarea);
-        textarea.select();
-        textarea.setSelectionRange(0, textarea.value.length);
-        try { document.execCommand('copy'); showToast('已复制'); } catch (e) { showToast('复制失败'); }
-        document.body.removeChild(textarea);
-    }
-
-    function showToast(msg) {
-        const existing = document.getElementById('devtools-toast');
-        if (existing) existing.remove();
-        const toast = document.createElement('div');
-        toast.id = 'devtools-toast';
-        toast.textContent = msg;
-        toast.style.cssText = 'position:fixed;bottom:60px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.8);color:#fff;padding:8px 20px;border-radius:20px;font-size:12px;z-index:2147483648;pointer-events:none;transition:opacity 0.3s;font-family:sans-serif;';
-        document.body.appendChild(toast);
-        setTimeout(() => { toast.style.opacity = '0'; }, 1200);
-        setTimeout(() => { toast.remove(); }, 1500);
-    }
-
     function getUniqueSelector(el) {
         if (el.id) return '#' + CSS.escape(el.id);
         if (el === document.body) return 'body';
@@ -1696,7 +1564,6 @@
         }
     }
 
-    // 工具结果复制函数
     window.devtoolsCopyToolResult = function(containerId) {
         const container = document.getElementById(containerId);
         if (container) {
@@ -1983,7 +1850,6 @@
         container.innerHTML = html;
     }
 
-    // Cookie 完善版操作函数
     window.devtoolsEditStorage = function(key, type) {
         if (type === 'cookie') {
             const cookieValue = document.cookie.split(';').find(c => c.trim().startsWith(key + '='))?.split('=')[1] || '';
@@ -2074,7 +1940,7 @@
         container.innerHTML = '<div class="devtools-resource-header"><span class="devtools-resource-title">缓存信息</span></div><div style="padding:8px;font-size:11px;"><div class="devtools-performance-metric"><span>内存使用</span><span>' + usedMemory + '</span></div><div class="devtools-performance-metric"><span>总内存</span><span>' + totalMemory + '</span></div><div class="devtools-performance-metric"><span>DOM节点数</span><span>' + domCount + '</span></div><button class="devtools-tool-btn" onclick="location.reload()" style="margin-top:10px;">刷新页面</button></div>';
     }
 
-    // ============ 性能面板 - 增强版（资源详情） ============
+    // ============ 性能面板 ============
     function renderPerformanceContent() {
         try {
             const container = document.getElementById('devtools-performance-content');
@@ -2115,7 +1981,6 @@
     // ============ 高亮滚动更新 ============
     function updateHighlightPosition() {
         if (!selectedElement) return;
-        // 直接重新调用 highlightElement 以保持布局层一致
         highlightElement(selectedElement);
     }
 
@@ -2149,7 +2014,7 @@
         hijackNetwork();
         addKeyboardShortcut();
         addScrollListener();
-        console.log('DevScope v5.4.7 已加载');
+        console.log('DevScope v5.4.8 已加载');
     }
 
     if (document.body) {
