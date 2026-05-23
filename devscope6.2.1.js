@@ -791,16 +791,36 @@
         });
         document.getElementById('devtools-reset-settings').addEventListener('click', () => {
             if (confirm('确定要重置所有设置吗？')) {
-                GM_setValue('devtools-sidebar-mode', isMobile ? 'overlay' : 'push');
-                GM_setValue('devtools-visual-width', isMobile ? 320 : 420);
-                GM_setValue('devtools-sidebar-zoom', isMobile ? 0.9 : 1);
+                const defaultMode = isMobile ? 'overlay' : 'push';
+                const defaultWidth = isMobile ? 320 : 420;
+                const defaultZoom = isMobile ? 0.9 : 1;
+                GM_setValue('devtools-sidebar-mode', defaultMode);
+                GM_setValue('devtools-visual-width', defaultWidth);
+                GM_setValue('devtools-sidebar-zoom', defaultZoom);
                 GM_setValue('devtools-sidebar-opacity', 1);
                 GM_setValue('devtools-dark-theme', false);
                 GM_setValue('devtools-auto-inspector', false);
                 GM_setValue('devtools-prefetch-post', false);
                 GM_setValue('devtools-fn-trace', false);
                 GM_setValue('devtools-dom-observe', false);
-                location.reload();
+                sidebarMode = defaultMode;
+                visualWidth = defaultWidth;
+                sidebarZoom = defaultZoom;
+                sidebarOpacity = 1;
+                document.getElementById('devtools-setting-mode').value = defaultMode;
+                document.getElementById('devtools-setting-width').value = defaultWidth;
+                document.getElementById('devtools-setting-width-val').textContent = defaultWidth + 'px';
+                document.getElementById('devtools-setting-zoom').value = defaultZoom;
+                document.getElementById('devtools-setting-zoom-val').textContent = defaultZoom.toFixed(2) + 'x';
+                document.getElementById('devtools-setting-opacity').value = 1;
+                document.getElementById('devtools-setting-opacity-val').textContent = '1';
+                document.getElementById('devtools-setting-auto-inspector').checked = false;
+                document.getElementById('devtools-setting-prefetch-post').checked = false;
+                document.getElementById('devtools-setting-fn-trace').checked = false;
+                document.getElementById('devtools-setting-dom-observe').checked = false;
+                applySidebarSettings();
+                if (isDarkTheme) { isDarkTheme = false; toggleTheme(); }
+                showToast('设置已重置');
             }
         });
         document.addEventListener('click', e => {
