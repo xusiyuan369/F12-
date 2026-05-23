@@ -2606,7 +2606,7 @@
             });
             window.__devscope_elementObserver.observe(document.documentElement, { childList: true, subtree: true });
         }
-        console.log('DevScope v6.0.8 已加载');
+        console.log('DevScope v6.2.1 已加载');
     }
 
     if (document.body) {
