@@ -1631,9 +1631,19 @@
         if (!responseContent) responseContent = '<div class="devtools-details-item"><div class="devtools-details-value" style="color:#999;">无响应数据</div></div>';
         const responseTab = '<div class="devtools-details-tab-content" id="devtools-net-tab-response">' + responseContent + '</div>';
 
-        fullDiv.innerHTML = '<div class="devtools-details-back" id="devtools-net-back">← 返回列表</div><div class="devtools-details-header"><span class="devtools-details-title">' + escapeHtml(req.method) + ' ' + escapeHtml(req.url.length > 60 ? req.url.substring(0, 60) + '...' : req.url) + '</span></div><div class="devtools-details-tabs"><div class="devtools-details-tab active" onclick="window.devtoolsSwitchNetTab(\'summary\',this)">概要</div><div class="devtools-details-tab" onclick="window.devtoolsSwitchNetTab(\'request\',this)">请求</div><div class="devtools-details-tab" onclick="window.devtoolsSwitchNetTab(\'response\',this)">响应</div></div>' + summaryTab + requestTab + responseTab;
+        fullDiv.innerHTML = '<div class="devtools-details-back" id="devtools-net-back">← 返回列表</div><div class="devtools-details-header"><span class="devtools-details-title">' + escapeHtml(req.method) + ' ' + escapeHtml(req.url.length > 60 ? req.url.substring(0, 60) + '...' : req.url) + '</span></div><div class="devtools-details-tabs" id="devtools-net-tabs"><div class="devtools-details-tab active" data-net-tab="summary">概要</div><div class="devtools-details-tab" data-net-tab="request">请求</div><div class="devtools-details-tab" data-net-tab="response">响应</div></div>' + summaryTab + requestTab + responseTab;
 
         document.getElementById('devtools-net-back').addEventListener('click', window.devtoolsHideNetworkDetails);
+        document.getElementById('devtools-net-tabs').addEventListener('click', function(e) {
+            var tab = e.target.closest('.devtools-details-tab');
+            if (!tab) return;
+            var tabName = tab.dataset.netTab;
+            this.querySelectorAll('.devtools-details-tab').forEach(function(t) { t.classList.remove('active'); });
+            tab.classList.add('active');
+            fullDiv.querySelectorAll('.devtools-details-tab-content').forEach(function(c) { c.classList.remove('active'); });
+            var target = document.getElementById('devtools-net-tab-' + tabName);
+            if (target) target.classList.add('active');
+        });
     };
 
     window.devtoolsSwitchNetTab = function(tab, el) {
