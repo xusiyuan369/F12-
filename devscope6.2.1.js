@@ -1940,7 +1940,9 @@
         document.removeEventListener('mousemove', onElementHoverMove, true);
         document.removeEventListener('click', onElementClick, true);
         document.removeEventListener('keydown', onEscapeKeydown);
-        // 无条件清除高亮覆盖层
+        // 清除高亮覆盖层和选中状态
+        selectedElement = null;
+        if (scrollRaf) { cancelAnimationFrame(scrollRaf); scrollRaf = null; }
         const overlay = document.getElementById('devtools-highlight-overlay');
         if (overlay) overlay.style.display = 'none';
     }
