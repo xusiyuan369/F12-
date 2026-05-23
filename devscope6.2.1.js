@@ -240,10 +240,10 @@
             .devtools-element-selector.active { background: var(--bg-btn-active, #000); color: #fff; }
             .devtools-element-container { display: flex; flex: 1; overflow: hidden; }
             .devtools-element-tree {
-                flex: 1; overflow-y: auto; font-family: Consolas, monospace; font-size: 11px;
+                flex: 1; overflow: auto; font-family: Consolas, monospace; font-size: 11px;
                 color: var(--text-primary, #333);
             }
-            .devtools-tree-node { display: flex; align-items: flex-start; padding: 1px 0; cursor: pointer; user-select: none; white-space: nowrap; min-height: 18px; overflow: hidden; }
+            .devtools-tree-node { display: flex; align-items: flex-start; padding: 1px 0; cursor: pointer; user-select: none; min-height: 18px; }
             .devtools-tree-node:hover { background: rgba(0, 120, 212, 0.08); }
             .devtools-tree-node.selected { background: rgba(0, 120, 212, 0.15); color: inherit; }
             .devtools-indent-guide { width: 16px; flex-shrink: 0; height: 18px; box-sizing: border-box; }
