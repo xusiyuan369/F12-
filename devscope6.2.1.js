@@ -479,6 +479,7 @@
 
     // ============ UI 构建 ============
     function createSidebar() {
+        if (document.getElementById('devtools-sidebar')) return;
         const toggleBtn = document.createElement('button');
         toggleBtn.className = 'devtools-toggle-btn';
         toggleBtn.id = 'devtools-toggle-btn';
