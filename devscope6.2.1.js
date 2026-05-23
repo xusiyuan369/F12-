@@ -74,6 +74,13 @@
             .replace(/'/g, '&#039;');
     }
 
+    function isSafeUrl(url) {
+        try {
+            const u = new URL(url, location.href);
+            return ['http:', 'https:', 'data:'].includes(u.protocol);
+        } catch { return false; }
+    }
+
     function safeStringify(obj) {
         try {
             return JSON.stringify(obj, null, 2);
@@ -2438,7 +2445,10 @@
         const container = document.getElementById('devtools-resource-content');
         const uniqueUrls = [...new Set(data.map(d => d.url))].slice(0, 100);
         let html = '<div class="devtools-resource-header"><span class="devtools-resource-title">' + title + '</span><span style="font-size:11px;color:#999;">显示 ' + uniqueUrls.length + ' 张（共 ' + data.length + '）</span></div><div class="devtools-image-grid">';
-        uniqueUrls.forEach(url => { html += '<div class="devtools-image-item"><img src="' + escapeHtml(url) + '" loading="lazy" alt="" onerror="this.style.display=\'none\';this.parentElement.innerHTML=\'<div style=&quot;padding:10px;text-align:center;color:#999;font-size:10px;&quot;>加载失败</div>\'"></div>'; });
+        uniqueUrls.forEach(url => {
+            if (!isSafeUrl(url)) return;
+            html += '<div class="devtools-image-item"><img src="' + escapeHtml(url) + '" loading="lazy" alt=""></div>';
+        });
         html += '</div>';
         container.innerHTML = html;
     }
